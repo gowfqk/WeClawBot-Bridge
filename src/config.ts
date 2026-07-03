@@ -15,10 +15,13 @@ const AgentConfigSchema = z.object({
   apiKey: z.string().optional(),
   model: z.string().optional(),
   format: z.enum(['native', 'openai']).optional(),
+  streaming: z.boolean().optional(),
+  responsePath: z.string().optional(),
   cliCommand: z.string().optional(),
   cliArgs: z.array(z.string()).optional(),
   cliWorkDir: z.string().optional(),
   cliMode: z.enum(['oneshot', 'persistent']).optional(),
+  cliSentinel: z.string().optional(),
 })
 
 const AgentsFileSchema = z.object({

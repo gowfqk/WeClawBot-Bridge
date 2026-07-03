@@ -1,6 +1,10 @@
 import type { AgentConfig, AgentPayload, AgentResponse } from './types'
 import { CliAgentAdapter } from './cli-agent'
 
+type OpenAIContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: string } }
+
 export class AgentRegistry {
   private agents: Map<string, AgentConfig> = new Map()
   private commandIndex: Map<string, string> = new Map()
@@ -55,19 +59,40 @@ export class AgentRegistry {
     return this.invokeHttp(agent, payload)
   }
 
+  private buildOpenAIMessages(
+    agent: AgentConfig,
+    payload: AgentPayload,
+  ): Array<{ role: string; content: string | OpenAIContentPart[] }> {
+    const messages: Array<{ role: string; content: string | OpenAIContentPart[] }> = []
+
+    for (const entry of payload.session.history) {
+      messages.push({ role: entry.role, content: entry.content })
+    }
+
+    const { text, media, type } = payload.message
+    const isImage = type === 'image' || type?.startsWith('image')
+
+    if (media && isImage) {
+      const mime = type === 'image' ? 'image/jpeg' : `image/${type.replace('image/', '')}`
+      const b64 = media.toString('base64')
+      const parts: OpenAIContentPart[] = [
+        { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}`, detail: 'auto' } },
+      ]
+      if (text) parts.push({ type: 'text', text })
+      messages.push({ role: 'user', content: parts })
+    } else {
+      messages.push({ role: 'user', content: text || '' })
+    }
+
+    return messages
+  }
+
   private buildRequestBody(agent: AgentConfig, payload: AgentPayload): Record<string, unknown> {
     if (agent.format === 'openai') {
-      const messages: Array<{ role: string; content: string }> = []
-
-      for (const entry of payload.session.history) {
-        messages.push({ role: entry.role, content: entry.content })
-      }
-
-      messages.push({ role: 'user', content: payload.message.text })
-
+      const messages = this.buildOpenAIMessages(agent, payload)
       const body: Record<string, unknown> = {
         messages,
-        stream: false,
+        stream: agent.streaming === true,
       }
       if (agent.model) body.model = agent.model
       return body
@@ -77,9 +102,7 @@ export class AgentRegistry {
       message: {
         text: payload.message.text,
         type: payload.message.type,
-        media: payload.message.media
-          ? payload.message.media.toString('base64')
-          : null,
+        media: payload.message.media ? payload.message.media.toString('base64') : null,
       },
       session: {
         userId: payload.session.userId,
@@ -123,9 +146,15 @@ export class AgentRegistry {
         return { reply: { text: this.defaultFallbackText } }
       }
 
-      const data = await response.json() as Record<string, unknown>
+      if (agent.streaming && agent.format === 'openai') {
+        const text = await this.readSSEStream(response)
+        return text ? { reply: { text } } : { reply: { text: this.defaultFallbackText } }
+      }
 
-      const text = this.extractResponseText(data)
+      const data = (await response.json()) as Record<string, unknown>
+      const text = agent.responsePath
+        ? this.extractByPath(data, agent.responsePath)
+        : this.extractResponseText(data)
 
       return text ? { reply: { text } } : { reply: { text: this.defaultFallbackText } }
     } catch (err: unknown) {
@@ -137,6 +166,55 @@ export class AgentRegistry {
     } finally {
       clearTimeout(timeout)
     }
+  }
+
+  private async readSSEStream(response: Response): Promise<string> {
+    const reader = response.body?.getReader()
+    if (!reader) return ''
+
+    const decoder = new TextDecoder()
+    let accumulated = ''
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        for (const line of chunk.split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data:')) continue
+          const payload = trimmed.slice(5).trim()
+          if (payload === '[DONE]') break
+          try {
+            const parsed = JSON.parse(payload) as Record<string, unknown>
+            const choices = parsed.choices as Array<Record<string, unknown>> | undefined
+            if (choices?.[0]) {
+              const delta = choices[0].delta as Record<string, unknown> | undefined
+              if (typeof delta?.content === 'string') {
+                accumulated += delta.content
+              }
+            }
+          } catch {
+            // 跳过非 JSON 行
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+
+    return accumulated
+  }
+
+  private extractByPath(data: Record<string, unknown>, path: string): string | null {
+    const keys = path.split('.')
+    let current: unknown = data
+    for (const key of keys) {
+      if (current == null || typeof current !== 'object') return null
+      current = (current as Record<string, unknown>)[key]
+    }
+    return typeof current === 'string' ? current : null
   }
 
   private extractResponseText(data: Record<string, unknown>): string | null {

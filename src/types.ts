@@ -12,10 +12,13 @@ export interface AgentConfig {
   apiKey?: string
   model?: string
   format?: 'native' | 'openai'
+  streaming?: boolean
+  responsePath?: string
   cliCommand?: string
   cliArgs?: string[]
   cliWorkDir?: string
   cliMode?: 'oneshot' | 'persistent'
+  cliSentinel?: string
 }
 
 export interface UserState {
