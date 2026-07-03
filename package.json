@@ -1,0 +1,34 @@
+{
+  "name": "weclawbot-bridge",
+  "version": "1.0.0",
+  "description": "WeClawBot Bridge — 微信 ↔ OpenClaw AI Agent 桥接网关",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@wechatbot/wechatbot": "^2.2.0",
+    "cors": "^2.8.6",
+    "csurf": "^1.11.0",
+    "express": "^4.21.0",
+    "helmet": "^7.2.0",
+    "node-cron": "^3.0.3",
+    "pino": "^9.5.0",
+    "prom-client": "^15.1.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/csurf": "^1.11.5",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WeClawBot Bridge - 管理面板</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;color:#333;display:flex;min-height:100vh}
+nav{width:200px;background:#1a1a2e;color:#e0e0e0;padding:20px 0;flex-shrink:0}
+nav h2{padding:0 20px 20px;font-size:16px;color:#fff;border-bottom:1px solid #333}
+nav a{display:block;padding:12px 20px;color:#a0a0c0;text-decoration:none;font-size:14px;cursor:pointer;transition:all .2s}
+nav a:hover,nav a.active{color:#fff;background:#16213e}
+main{flex:1;padding:24px;overflow-y:auto}
+.card{background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:20px}
+h1{font-size:20px;margin-bottom:4px}
+h3{font-size:15px;margin-bottom:12px;color:#555}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #eee}
+th{color:#888;font-weight:500;font-size:12px;text-transform:uppercase}
+.badge{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600}
+.badge-http{background:#dbeafe;color:#1e40af}
+.badge-cli{background:#fef3c7;color:#92400e}
+.badge-online{background:#d4edda;color:#155724}
+.badge-offline{background:#f8d7da;color:#721c24}
+.btn{padding:8px 16px;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500;transition:all .2s}
+.btn-primary{background:#4f46e5;color:#fff}
+.btn-primary:hover{background:#4338ca}
+.btn-danger{background:#dc2626;color:#fff}
+.btn-danger:hover{background:#b91c1c}
+.btn-secondary{background:#e5e7eb;color:#374151}
+.btn-secondary:hover{background:#d1d5db}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:13px;font-weight:500;color:#555;margin-bottom:4px}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-family:inherit}
+.form-group textarea{resize:vertical;min-height:80px}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:#4f46e5;box-shadow:0 0 0 3px rgba(79,70,229,.1)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:6px;font-size:13px;color:#fff;z-index:200;animation:slideIn .3s}
+.toast-success{background:#16a34a}
+.toast-error{background:#dc2626}
+@keyframes slideIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+.tab-content{display:none}
+.tab-content.active{display:block}
+.qr-box{text-align:center;margin:16px 0}
+.qr-box img{border:1px solid #e5e7eb;border-radius:8px;max-width:200px}
+.empty{text-align:center;color:#999;padding:40px;font-size:14px}
+code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-family:'SF Mono',monospace}
+
+/* 登录遮罩 */
+#login-overlay{position:fixed;inset:0;background:linear-gradient(135deg,#1a1a2e,#16213e);display:flex;align-items:center;justify-content:center;z-index:1000}
+.login-box{background:#fff;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.3);padding:40px;width:360px;max-width:90vw}
+.login-box .logo{font-size:32px;text-align:center;margin-bottom:8px}
+.login-box h2{text-align:center;font-size:18px;color:#333;margin-bottom:24px}
+.login-box .form-group{margin-bottom:16px}
+.login-box .btn{width:100%;padding:10px;font-size:14px}
+.login-box .error-msg{color:#dc2626;font-size:13px;text-align:center;margin-bottom:12px;display:none}
+.login-box .hint{text-align:center;font-size:12px;color:#999;margin-top:16px}
+.login-divider{height:1px;background:#e5e7eb;margin:20px 0}
+.login-box .mode-switch{text-align:center;font-size:13px;color:#4f46e5;cursor:pointer}
+.login-box .mode-switch:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+
+<!-- 登录遮罩 -->
+<div id="login-overlay" style="display:none">
+  <div class="login-box">
+    <div class="logo">🤖</div>
+    <h2 id="login-title">管理面板登录</h2>
+    <div id="login-error" class="error-msg"></div>
+
+    <!-- 登录表单 -->
+    <div id="login-form-wrap">
+      <div class="form-group">
+        <label>管理密码</label>
+        <input id="login-password" type="password" placeholder="请输入管理密码" onkeydown="if(event.key==='Enter')doLogin()">
+      </div>
+      <button class="btn btn-primary" onclick="doLogin()">登 录</button>
+      <div class="hint">输入管理密码以访问控制面板</div>
+    </div>
+
+    <!-- 首次设置密码 -->
+    <div id="setup-form-wrap" style="display:none">
+      <div class="form-group">
+        <label>设置管理密码</label>
+        <input id="setup-password" type="password" placeholder="至少4位字符" onkeydown="if(event.key==='Enter')doSetup()">
+      </div>
+      <div class="form-group">
+        <label>确认密码</label>
+        <input id="setup-password2" type="password" placeholder="再次输入密码" onkeydown="if(event.key==='Enter')doSetup()">
+      </div>
+      <button class="btn btn-primary" onclick="doSetup()">设置密码并登录</button>
+      <div class="hint">首次使用，请设置管理面板的访问密码</div>
+    </div>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<nav>
+  <h2>WeClawBot Bridge</h2>
+  <a class="active" data-tab="agents">Agent 管理</a>
+  <a data-tab="bot">Bot 控制</a>
+  <a data-tab="notify">通知管理</a>
+  <a data-tab="settings">设置</a>
+  <a data-tab="api">API 参考</a>
+</nav>
+<main>
+  <div style="background:#f8f9fa;padding:12px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:between;">
+    <div style="font-size:14px;font-weight:500;color:#333;flex:1;">
+      🤖 WeClawBot Bridge - 管理面板
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;font-size:12px;">
+      <span id="connection-status" style="display:flex;align-items:center;gap:4px;">
+        <span style="width:8px;height:8px;background:#10b981;border-radius:50%;" id="status-dot"></span>
+        <span id="status-text">连接中...</span>
+      </span>
+      <button class="btn btn-secondary" style="padding:4px 12px;font-size:12px" onclick="doLogout()">退出登录</button>
+    </div>
+  </div>
+
+  <div id="tab-agents" class="tab-content active">
+    <div class="card">
+      <h3>添加 Agent</h3>
+      <div class="form-row">
+        <div class="form-group"><label>ID</label><input id="add-id" placeholder="例如 openclaw-main"></div>
+        <div class="form-group"><label>名称</label><input id="add-name" placeholder="例如 OpenClaw 主实例"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>切换命令</label><input id="add-command" placeholder="例如 openclaw (用户发送 /openclaw)"></div>
+        <div class="form-group"><label>类型</label><select id="add-type" onchange="toggleAgentFields()">
+          <option value="http">HTTP</option><option value="cli">CLI</option>
+        </select></div>
+      </div>
+      <div class="form-group"><label>描述</label><input id="add-desc" placeholder="简短描述"></div>
+      <div id="http-fields">
+        <div class="form-row">
+          <div class="form-group"><label>HTTP 端点</label><input id="add-endpoint" placeholder="http://localhost:3100/api/chat"></div>
+          <div class="form-group"><label>超时 (ms)</label><input id="add-timeout" type="number" value="30000"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>API Key (可选)</label><input id="add-api-key" type="password" placeholder="API 服务的访问密钥"></div>
+          <div class="form-group"><label>模型 (可选)</label><input id="add-model" placeholder="例如 gpt-4o, claude-sonnet-4-20250514"></div>
+        </div>
+        <div class="form-group"><label>请求格式</label><select id="add-format">
+          <option value="native">native - 网关原生格式</option>
+          <option value="openai">openai - OpenAI 兼容格式</option>
+        </select></div>
+      </div>
+      <div id="cli-fields" style="display:none">
+        <div class="form-row">
+          <div class="form-group"><label>CLI 命令</label><input id="add-cli-command" placeholder="例如 claude"></div>
+          <div class="form-group"><label>工作目录</label><input id="add-cli-workdir" placeholder="例如 /workspace"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>参数 (逗号分隔)</label><input id="add-cli-args" placeholder="-p, --output-format, text"></div>
+          <div class="form-group"><label>模式</label><select id="add-cli-mode">
+            <option value="oneshot">oneshot - 每次独立调用</option>
+            <option value="persistent">persistent - 持久会话</option>
+          </select></div>
+        </div>
+        <div class="form-group"><label>超时 (ms)</label><input id="add-cli-timeout" type="number" value="60000"></div>
+      </div>
+      <button class="btn btn-primary" id="add-agent-btn" onclick="submitAgent()">添加 Agent</button>
+      <button class="btn btn-secondary" id="cancel-edit-btn" style="display:none;margin-left:8px" onclick="cancelEdit()">取消编辑</button>
+    </div>
+    <div class="card">
+      <h3>已注册 Agent (<span id="agent-count">0</span>)</h3>
+      <table><thead><tr><th>命令</th><th>名称</th><th>类型</th><th>描述</th><th>端点/命令</th><th>模型</th><th>操作</th></tr></thead>
+      <tbody id="agent-list"><tr><td colspan="7" class="empty">加载中...</td></tr></tbody></table>
+    </div>
+    <div class="card">
+      <h3>Agent 测试</h3>
+      <div class="form-row">
+        <div class="form-group"><label>选择 Agent</label><select id="test-agent-select"><option value="">-- 请选择 --</option></select></div>
+        <div class="form-group"><label style="visibility:hidden">.</label><button class="btn btn-primary" onclick="testAgent()" style="width:100%">发送测试</button></div>
+      </div>
+      <div class="form-group"><label>测试消息</label><textarea id="test-message" placeholder="输入测试消息..." rows="2"></textarea></div>
+      <div id="test-result" style="margin-top:12px;padding:12px;background:#f8f9fa;border-radius:6px;font-size:13px;display:none">
+        <div id="test-result-text" style="white-space:pre-wrap;margin-bottom:4px"></div>
+        <div id="test-result-meta" style="color:#888;font-size:12px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-bot" class="tab-content">
+    <div class="card">
+      <h3>Bot 状态</h3>
+      <p>在线状态：<span class="badge" id="bot-status-badge">检查中...</span></p>
+      <p id="bot-account" style="font-size:13px;color:#888;margin-top:4px"></p>
+      <p id="bot-user" style="font-size:13px;color:#888;margin-top:4px"></p>
+      <p id="bot-polling" style="font-size:13px;color:#888;margin-top:4px"></p>
+      <div class="qr-box" id="qr-box" style="display:none">
+        <p style="margin-bottom:8px">微信扫码登录：</p>
+        <img id="qr-img" src="" alt="QR Code">
+      </div>
+      <div style="margin-top:12px">
+        <button class="btn btn-primary" onclick="loginBot()">获取登录二维码</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-notify" class="tab-content">
+    <div class="card">
+      <h3>发送通知</h3>
+      <div class="form-group"><label>消息内容</label><textarea id="notify-text" placeholder="通知文本内容"></textarea></div>
+      <button class="btn btn-primary" onclick="sendNotify()">发送通知</button>
+    </div>
+    <div class="card">
+      <h3>通知规则</h3>
+      <div style="text-align:center;color:#999;padding:40px;font-size:14px;">
+        通知规则功能正在开发中
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-settings" class="tab-content">
+    <div class="card">
+      <h3>修改管理密码</h3>
+      <div class="form-group"><label>当前密码</label><input id="old-password" type="password" placeholder="输入当前密码"></div>
+      <div class="form-group"><label>新密码</label><input id="new-password" type="password" placeholder="至少4位字符"></div>
+      <div class="form-group"><label>确认新密码</label><input id="new-password2" type="password" placeholder="再次输入新密码"></div>
+      <button class="btn btn-primary" onclick="changePassword()">修改密码</button>
+    </div>
+  </div>
+
+  <div id="tab-api" class="tab-content">
+    <div class="card">
+      <h3>API 端点</h3>
+      <table>
+        <tr><td style="width:200px"><code>GET /api/health</code></td><td>健康检查</td></tr>
+        <tr><td><code>GET /api/metrics</code></td><td>Prometheus 指标</td></tr>
+        <tr><td><code>POST /api/auth/login</code></td><td>管理面板登录</td></tr>
+        <tr><td><code>GET /api/auth/status</code></td><td>检查登录状态</td></tr>
+        <tr><td><code>POST /api/auth/setup</code></td><td>首次设置密码</td></tr>
+        <tr><td><code>POST /api/auth/change-password</code></td><td>修改管理密码</td></tr>
+        <tr><td><code>POST /api/bot/login</code></td><td>获取 Bot 登录二维码</td></tr>
+        <tr><td><code>GET /api/bot/status</code></td><td>Bot 在线状态</td></tr>
+        <tr><td><code>GET /api/agents</code></td><td>列出所有 Agent</td></tr>
+        <tr><td><code>POST /api/agents</code></td><td>注册新 Agent</td></tr>
+        <tr><td><code>PUT /api/agents/:id</code></td><td>更新 Agent</td></tr>
+        <tr><td><code>POST /api/agents/:id/test</code></td><td>测试 Agent 调用</td></tr>
+        <tr><td><code>DELETE /api/agents/:id</code></td><td>删除 Agent</td></tr>
+        <tr><td><code>POST /api/notify</code></td><td>发送通知</td></tr>
+        <tr><td><code>POST /api/webhook</code></td><td>Webhook 通知（外部程序调用）</td></tr>
+      </table>
+    </div>
+  </div>
+</main>
+<div id="toast" class="toast" style="display:none"></div>
+
+<script>
+// ===== 认证管理 =====
+const Auth = {
+  token: localStorage.getItem('admin_token') || '',
+
+  setToken(t) {
+    this.token = t
+    localStorage.setItem('admin_token', t)
+  },
+
+  clearToken() {
+    this.token = ''
+    localStorage.removeItem('admin_token')
+  },
+
+  headers() {
+    const h = { 'Content-Type': 'application/json' }
+    if (this.token) h['Authorization'] = 'Bearer ' + this.token
+    return h
+  }
+}
+
+// ===== API 封装 =====
+const API = {
+  async get(url) {
+    const r = await fetch(url, { headers: Auth.headers() })
+    if (!r.ok) throw new Error(await r.text())
+    return r.json()
+  },
+  async post(url, body) {
+    const r = await fetch(url, { method: 'POST', headers: Auth.headers(), body: JSON.stringify(body || {}) })
+    if (!r.ok) throw new Error(await r.text())
+    return r.json()
+  },
+  async put(url, body) {
+    const r = await fetch(url, { method: 'PUT', headers: Auth.headers(), body: JSON.stringify(body) })
+    if (!r.ok) throw new Error(await r.text())
+    return r.json()
+  },
+  async del(url) {
+    const r = await fetch(url, { method: 'DELETE', headers: Auth.headers() })
+    if (!r.ok) throw new Error(await r.text())
+    return r.json()
+  }
+}
+
+function toast(msg, type = 'success') {
+  const el = document.getElementById('toast')
+  el.textContent = msg
+  el.className = 'toast toast-' + type
+  el.style.display = 'block'
+  setTimeout(() => el.style.display = 'none', 3000)
+}
+
+function showLoginError(msg) {
+  const el = document.getElementById('login-error')
+  el.textContent = msg
+  el.style.display = 'block'
+}
+
+function hideLoginError() {
+  document.getElementById('login-error').style.display = 'none'
+}
+
+// ===== 登录流程 =====
+async function checkAuth() {
+  try {
+    const r = await fetch('/api/auth/status', { headers: Auth.headers() })
+    const data = await r.json()
+
+    if (!data.passwordSet) {
+      // 未设置密码，显示首次设置界面
+      showSetupForm()
+      return
+    }
+
+    if (data.authenticated) {
+      // 已登录，显示主界面
+      enterAdmin()
+    } else {
+      // 未登录，显示登录表单
+      showLoginForm()
+    }
+  } catch {
+    showLoginForm()
+  }
+}
+
+function showLoginForm() {
+  document.getElementById('login-overlay').style.display = 'flex'
+  document.getElementById('login-form-wrap').style.display = ''
+  document.getElementById('setup-form-wrap').style.display = 'none'
+  document.getElementById('login-title').textContent = '管理面板登录'
+  hideLoginError()
+}
+
+function showSetupForm() {
+  document.getElementById('login-overlay').style.display = 'flex'
+  document.getElementById('login-form-wrap').style.display = 'none'
+  document.getElementById('setup-form-wrap').style.display = ''
+  document.getElementById('login-title').textContent = '首次设置'
+  hideLoginError()
+}
+
+function enterAdmin() {
+  document.getElementById('login-overlay').style.display = 'none'
+  initAdmin()
+}
+
+async function doLogin() {
+  hideLoginError()
+  const password = document.getElementById('login-password').value
+  if (!password) { showLoginError('请输入密码'); return }
+
+  try {
+    const r = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    })
+    const data = await r.json()
+    if (r.ok && data.authenticated) {
+      Auth.setToken(data.token)
+      enterAdmin()
+    } else {
+      showLoginError(data.error || '登录失败')
+    }
+  } catch (e) {
+    showLoginError('网络错误，请重试')
+  }
+}
+
+async function doSetup() {
+  hideLoginError()
+  const password = document.getElementById('setup-password').value
+  const password2 = document.getElementById('setup-password2').value
+
+  if (!password || password.length < 4) { showLoginError('密码至少4位'); return }
+  if (password !== password2) { showLoginError('两次输入的密码不一致'); return }
+
+  try {
+    const r = await fetch('/api/auth/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    })
+    const data = await r.json()
+    if (r.ok) {
+      Auth.setToken(data.token)
+      enterAdmin()
+      toast('密码设置成功')
+    } else {
+      showLoginError(data.error || '设置失败')
+    }
+  } catch (e) {
+    showLoginError('网络错误，请重试')
+  }
+}
+
+function doLogout() {
+  Auth.clearToken()
+  showLoginForm()
+  document.getElementById('login-password').value = ''
+  toast('已退出登录')
+}
+
+async function changePassword() {
+  const oldPw = document.getElementById('old-password').value
+  const newPw = document.getElementById('new-password').value
+  const newPw2 = document.getElementById('new-password2').value
+
+  if (!oldPw) { toast('请输入当前密码', 'error'); return }
+  if (!newPw || newPw.length < 4) { toast('新密码至少4位', 'error'); return }
+  if (newPw !== newPw2) { toast('两次输入的新密码不一致', 'error'); return }
+
+  try {
+    const data = await API.post('/api/auth/change-password', { oldPassword: oldPw, newPassword: newPw })
+    if (data.token) Auth.setToken(data.token)
+    toast('密码修改成功')
+    document.getElementById('old-password').value = ''
+    document.getElementById('new-password').value = ''
+    document.getElementById('new-password2').value = ''
+  } catch (e) {
+    toast(e.message, 'error')
+  }
+}
+
+// ===== 管理面板逻辑 =====
+let adminInitialized = false
+
+function initAdmin() {
+  if (adminInitialized) return
+  adminInitialized = true
+
+  document.querySelectorAll('nav a').forEach(a => {
+    a.addEventListener('click', () => {
+      document.querySelectorAll('nav a').forEach(x => x.classList.remove('active'))
+      a.classList.add('active')
+      document.querySelectorAll('.tab-content').forEach(x => x.classList.remove('active'))
+      document.getElementById('tab-' + a.dataset.tab).classList.add('active')
+      if (a.dataset.tab === 'agents') loadAgents()
+      if (a.dataset.tab === 'bot') loadBotStatus()
+    })
+  })
+
+  loadAgents()
+  loadBotStatus()
+  updateConnectionStatus()
+  setInterval(updateConnectionStatus, 30000)
+}
+
+let editingAgentId = null
+
+function fillAgentForm(agent) {
+  document.getElementById('add-id').value = agent.id || ''
+  document.getElementById('add-name').value = agent.name || ''
+  document.getElementById('add-command').value = agent.command || ''
+  document.getElementById('add-type').value = agent.type || 'http'
+  document.getElementById('add-desc').value = agent.description || ''
+  document.getElementById('add-format').value = agent.format || 'native'
+  toggleAgentFields()
+  if (agent.type === 'http') {
+    document.getElementById('add-endpoint').value = agent.endpoint || ''
+    document.getElementById('add-timeout').value = agent.timeout || 30000
+    document.getElementById('add-api-key').value = agent.apiKey || ''
+    document.getElementById('add-model').value = agent.model || ''
+  } else {
+    document.getElementById('add-cli-command').value = agent.cliCommand || ''
+    document.getElementById('add-cli-workdir').value = agent.cliWorkDir || ''
+    document.getElementById('add-cli-args').value = (agent.cliArgs || []).join(', ')
+    document.getElementById('add-cli-mode').value = agent.cliMode || 'oneshot'
+    document.getElementById('add-cli-timeout').value = agent.timeout || 60000
+  }
+}
+
+function clearAgentForm() {
+  document.querySelectorAll('#add-id,#add-name,#add-command,#add-desc,#add-endpoint,#add-api-key,#add-model,#add-cli-command,#add-cli-workdir,#add-cli-args').forEach(el => el.value = '')
+  document.getElementById('add-type').value = 'http'
+  document.getElementById('add-timeout').value = '30000'
+  document.getElementById('add-cli-timeout').value = '60000'
+  document.getElementById('add-cli-mode').value = 'oneshot'
+  toggleAgentFields()
+}
+
+async function editAgent(id) {
+  try {
+    const agents = await API.get('/api/agents')
+    const agent = agents.find(a => a.id === id)
+    if (!agent) { toast('Agent 未找到', 'error'); return }
+    editingAgentId = id
+    document.getElementById('add-id').disabled = true
+    document.getElementById('add-agent-btn').textContent = '更新 Agent'
+    document.getElementById('cancel-edit-btn').style.display = ''
+    fillAgentForm(agent)
+  } catch(e) { toast(e.message, 'error') }
+}
+
+function cancelEdit() {
+  editingAgentId = null
+  document.getElementById('add-id').disabled = false
+  document.getElementById('add-agent-btn').textContent = '添加 Agent'
+  document.getElementById('cancel-edit-btn').style.display = 'none'
+  clearAgentForm()
+}
+
+async function submitAgent() {
+  const type = document.getElementById('add-type').value
+  const agent = {
+    name: document.getElementById('add-name').value,
+    command: document.getElementById('add-command').value,
+    type,
+    description: document.getElementById('add-desc').value,
+    format: document.getElementById('add-format').value,
+  }
+  if (type === 'http') {
+    agent.endpoint = document.getElementById('add-endpoint').value
+    agent.timeout = parseInt(document.getElementById('add-timeout').value) || 30000
+    agent.apiKey = document.getElementById('add-api-key').value || undefined
+    agent.model = document.getElementById('add-model').value || undefined
+  } else {
+    agent.cliCommand = document.getElementById('add-cli-command').value
+    agent.cliWorkDir = document.getElementById('add-cli-workdir').value || undefined
+    agent.cliArgs = document.getElementById('add-cli-args').value.split(',').map(s => s.trim()).filter(Boolean)
+    agent.cliMode = document.getElementById('add-cli-mode').value
+    agent.timeout = parseInt(document.getElementById('add-cli-timeout').value) || 60000
+  }
+  try {
+    if (editingAgentId) {
+      await API.put('/api/agents/' + editingAgentId, agent)
+      toast('Agent 已更新')
+      cancelEdit()
+    } else {
+      agent.id = document.getElementById('add-id').value
+      await API.post('/api/agents', agent)
+      toast('Agent 添加成功')
+      clearAgentForm()
+    }
+    loadAgents()
+  } catch(e) { toast(e.message, 'error') }
+}
+
+function toggleAgentFields() {
+  const type = document.getElementById('add-type').value
+  document.getElementById('http-fields').style.display = type === 'http' ? '' : 'none'
+  document.getElementById('cli-fields').style.display = type === 'cli' ? '' : 'none'
+}
+
+async function loadAgents() {
+  try {
+    const agents = await API.get('/api/agents')
+    document.getElementById('agent-count').textContent = agents.length
+    const tbody = document.getElementById('agent-list')
+    if (agents.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">暂无 Agent</td></tr>'
+      return
+    }
+    tbody.innerHTML = agents.map(a => `<tr>
+      <td><code>/${a.command}</code></td>
+      <td>${a.name}</td>
+      <td><span class="badge badge-${a.type || 'http'}">${a.type || 'http'}</span></td>
+      <td style="color:#888">${a.description}</td>
+      <td style="font-size:12px;color:#6b7280">${a.type === 'cli' ? (a.cliCommand || '') + ' ' + (a.cliArgs || []).join(' ') : (a.endpoint || '')}</td>
+      <td style="font-size:12px;color:#6b7280">${a.model || '-'}</td>
+      <td><button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;margin-right:4px" onclick="editAgent('${a.id}')">编辑</button><button class="btn btn-danger" style="padding:4px 10px;font-size:12px" onclick="removeAgent('${a.id}')">删除</button></td>
+    </tr>`).join('')
+    const sel = document.getElementById('test-agent-select')
+    sel.innerHTML = '<option value="">-- 请选择 --</option>' + agents.map(a => `<option value="${a.id}">/${a.command} - ${a.name}</option>`).join('')
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function removeAgent(id) {
+  if (!confirm('确定要删除 Agent "' + id + '" 吗？')) return
+  try {
+    await API.del('/api/agents/' + id)
+    toast('Agent 已删除')
+    loadAgents()
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function testAgent() {
+  const agentId = document.getElementById('test-agent-select').value
+  const text = document.getElementById('test-message').value
+  if (!agentId || !text) { toast('请选择 Agent 并输入测试消息', 'error'); return }
+  const result = document.getElementById('test-result')
+  result.style.display = ''
+  document.getElementById('test-result-text').textContent = '请求中...'
+  document.getElementById('test-result-meta').textContent = ''
+  try {
+    const data = await API.post('/api/agents/' + agentId + '/test', { text })
+    document.getElementById('test-result-text').textContent = data.text
+    document.getElementById('test-result-meta').textContent = '耗时 ' + data.elapsed + 'ms'
+  } catch(e) {
+    document.getElementById('test-result-text').textContent = '错误: ' + e.message
+    document.getElementById('test-result-meta').textContent = ''
+  }
+}
+
+async function loadBotStatus() {
+  try {
+    const status = await API.get('/api/bot/status')
+    const badge = document.getElementById('bot-status-badge')
+    badge.textContent = status.loggedIn ? '在线' : '离线'
+    badge.className = 'badge ' + (status.loggedIn ? 'badge-online' : 'badge-offline')
+    document.getElementById('bot-account').textContent = status.accountId ? 'Bot 账号：' + status.accountId : ''
+    document.getElementById('bot-user').textContent = status.currentUser ? '当前用户：' + status.currentUser : ''
+    document.getElementById('bot-polling').textContent = status.polling ? '消息轮询：运行中' : (status.loggedIn ? '消息轮询：未启动' : '')
+    if (status.qrUrl) {
+      document.getElementById('qr-box').style.display = ''
+      document.getElementById('qr-img').src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(status.qrUrl)
+    }
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function loginBot() {
+  try {
+    const data = await API.post('/api/bot/login', {})
+    if (data.qrUrl) {
+      document.getElementById('qr-box').style.display = ''
+      document.getElementById('qr-img').src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(data.qrUrl)
+      toast('二维码已刷新，请扫码登录')
+    }
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function sendNotify() {
+  const text = document.getElementById('notify-text').value
+  if (!text) { toast('请填写消息内容', 'error'); return }
+  try {
+    await API.post('/api/notify', { content: { text } })
+    toast('通知发送成功')
+    document.getElementById('notify-text').value = ''
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function updateConnectionStatus() {
+  try {
+    const health = await fetch('/api/health').then(r => r.json())
+    const statusEl = document.getElementById('status-dot')
+    const textEl = document.getElementById('status-text')
+
+    if (health.status === 'ok' && health.bot.loggedIn) {
+      statusEl.style.background = '#10b981'
+      textEl.textContent = '已连接'
+    } else {
+      statusEl.style.background = '#f59e0b'
+      textEl.textContent = '离线'
+    }
+  } catch (e) {
+    document.getElementById('status-dot').style.background = '#ef4444'
+    document.getElementById('status-text').textContent = '连接失败'
+  }
+}
+
+// 启动时检查认证状态
+checkAuth()
+</script>
+</body>
+</html>

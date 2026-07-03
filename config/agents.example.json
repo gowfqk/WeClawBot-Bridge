@@ -1,0 +1,30 @@
+{
+  "agents": [
+    {
+      "id": "openclaw-main",
+      "name": "OpenClaw 主实例",
+      "command": "openclaw",
+      "type": "http",
+      "description": "OpenClaw AI 网关主实例",
+      "endpoint": "https://your-openclaw-endpoint.example.com/v1/chat/completions",
+      "timeout": 120000,
+      "apiKey": "your-api-key-here",
+      "model": "openclaw/main",
+      "format": "openai"
+    },
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "command": "claude",
+      "type": "cli",
+      "description": "Claude Code CLI 编程助手",
+      "timeout": 120000,
+      "model": "claude-sonnet-4-20250514",
+      "cliCommand": "claude",
+      "cliArgs": ["-p", "--output-format", "text"],
+      "cliWorkDir": "/workspace",
+      "cliMode": "oneshot"
+    }
+  ],
+  "defaultAgentId": "openclaw-main"
+}
