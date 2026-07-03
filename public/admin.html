@@ -7,10 +7,19 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;color:#333;display:flex;min-height:100vh}
-nav{width:200px;background:#1a1a2e;color:#e0e0e0;padding:20px 0;flex-shrink:0}
-nav h2{padding:0 20px 20px;font-size:16px;color:#fff;border-bottom:1px solid #333}
-nav a{display:block;padding:12px 20px;color:#a0a0c0;text-decoration:none;font-size:14px;cursor:pointer;transition:all .2s}
+nav{width:200px;background:#1a1a2e;color:#e0e0e0;padding:20px 0;flex-shrink:0;transition:width .25s ease;overflow:hidden;position:relative}
+nav.collapsed{width:48px}
+nav h2{padding:0 20px 20px;font-size:16px;color:#fff;border-bottom:1px solid #333;white-space:nowrap;overflow:hidden}
+nav a{display:flex;align-items:center;gap:10px;padding:12px 14px;color:#a0a0c0;text-decoration:none;font-size:14px;cursor:pointer;transition:all .2s;white-space:nowrap;overflow:hidden}
 nav a:hover,nav a.active{color:#fff;background:#16213e}
+nav a .nav-icon{flex-shrink:0;width:20px;text-align:center;font-size:16px}
+nav a .nav-label{transition:opacity .2s}
+nav.collapsed a .nav-label{opacity:0;pointer-events:none}
+nav.collapsed h2 .nav-title{opacity:0}
+.nav-toggle{display:flex;align-items:center;justify-content:flex-end;padding:0 10px 12px;border-bottom:1px solid #333;margin-bottom:4px}
+nav.collapsed .nav-toggle{justify-content:center}
+.nav-toggle-btn{background:none;border:none;color:#a0a0c0;cursor:pointer;padding:4px 6px;border-radius:4px;font-size:18px;line-height:1;transition:color .2s}
+.nav-toggle-btn:hover{color:#fff;background:rgba(255,255,255,.08)}
 main{flex:1;padding:24px;overflow-y:auto}
 .card{background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;margin-bottom:20px}
 h1{font-size:20px;margin-bottom:4px}
@@ -97,13 +106,16 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-fa
 </div>
 
 <!-- 主界面 -->
-<nav>
-  <h2>WeClawBot Bridge</h2>
-  <a class="active" data-tab="agents">Agent 管理</a>
-  <a data-tab="bot">Bot 控制</a>
-  <a data-tab="notify">通知管理</a>
-  <a data-tab="settings">设置</a>
-  <a data-tab="api">API 参考</a>
+<nav id="sidebar">
+  <h2><span class="nav-title">WeClawBot Bridge</span></h2>
+  <div class="nav-toggle">
+    <button class="nav-toggle-btn" id="sidebar-toggle" onclick="toggleSidebar()" title="展开/关闭侧边栏">&#8942;</button>
+  </div>
+  <a class="active" data-tab="agents"><span class="nav-icon">🤖</span><span class="nav-label">Agent 管理</span></a>
+  <a data-tab="bot"><span class="nav-icon">📱</span><span class="nav-label">Bot 控制</span></a>
+  <a data-tab="notify"><span class="nav-icon">🔔</span><span class="nav-label">通知管理</span></a>
+  <a data-tab="settings"><span class="nav-icon">⚙️</span><span class="nav-label">设置</span></a>
+  <a data-tab="api"><span class="nav-icon">📖</span><span class="nav-label">API 参考</span></a>
 </nav>
 <main>
   <div style="background:#f8f9fa;padding:12px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:between;">
@@ -660,6 +672,18 @@ async function updateConnectionStatus() {
     document.getElementById('status-dot').style.background = '#ef4444'
     document.getElementById('status-text').textContent = '连接失败'
   }
+}
+
+// ===== 侧边栏展开/关闭 =====
+function toggleSidebar() {
+  const nav = document.getElementById('sidebar')
+  const collapsed = nav.classList.toggle('collapsed')
+  localStorage.setItem('sidebar_collapsed', collapsed ? '1' : '0')
+}
+
+// 恢复侧边栏状态
+if (localStorage.getItem('sidebar_collapsed') === '1') {
+  document.getElementById('sidebar').classList.add('collapsed')
 }
 
 // 启动时检查认证状态
