@@ -38,7 +38,7 @@ export function createServer(
         styleSrc: ["'self'", "'unsafe-inline'"],
         styleSrcAttr: ["'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https://api.qrserver.com"],
-        connectSrc: ["'self'", "http://localhost:*"],
+        connectSrc: ["'self'", "http://localhost:*", "https://*.replit.dev", "https://*.replit.app"],
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
@@ -49,7 +49,7 @@ export function createServer(
   }))
   
   app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:3001'],
+    origin: process.env.ALLOWED_ORIGINS?.split(',') || true,
     credentials: true
   }))
   
