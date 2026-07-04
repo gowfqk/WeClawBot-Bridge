@@ -143,7 +143,20 @@ export class AgentRegistry {
       if (!response.ok) {
         const errText = await response.text().catch(() => '')
         console.error(`Agent "${agent.id}" HTTP ${response.status}: ${errText.slice(0, 200)}`)
-        return { reply: { text: this.defaultFallbackText } }
+        const s = response.status
+        let msg: string
+        if (s === 401 || s === 403) {
+          msg = `Agent 认证失败（${s}），请检查 API Key 配置。`
+        } else if (s === 404) {
+          msg = `Agent 端点地址无效（404），请在管理面板检查端点 URL 配置。`
+        } else if (s === 429) {
+          msg = `Agent 请求频率超限（429），请稍后再试。`
+        } else if (s >= 400 && s < 500) {
+          msg = `Agent 请求错误（${s}），请检查 Agent 配置。`
+        } else {
+          msg = `Agent 服务暂时不可用（${s}），请稍后再试。`
+        }
+        return { reply: { text: msg } }
       }
 
       if (agent.streaming && agent.format === 'openai') {
@@ -160,9 +173,10 @@ export class AgentRegistry {
     } catch (err: unknown) {
       const error = err as Error
       if (error.name === 'AbortError') {
-        return { reply: { text: '服务繁忙，请稍后再试。' } }
+        return { reply: { text: `Agent 响应超时（>${Math.round((agent.timeout || 30000) / 1000)}s），请稍后再试。` } }
       }
-      return { reply: { text: this.defaultFallbackText } }
+      console.error(`Agent "${agent.id}" unexpected error:`, error.message)
+      return { reply: { text: `Agent 调用失败：${error.message}` } }
     } finally {
       clearTimeout(timeout)
     }
