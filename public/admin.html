@@ -49,6 +49,7 @@ th{color:#888;font-weight:500;font-size:12px;text-transform:uppercase}
 .toast-success{background:#16a34a}
 .toast-error{background:#dc2626}
 @keyframes slideIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 .tab-content{display:none}
 .tab-content.active{display:block}
 .qr-box{text-align:center;margin:16px 0}
@@ -295,12 +296,23 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-fa
       <p id="bot-account" style="font-size:13px;color:#888;margin-top:4px"></p>
       <p id="bot-user" style="font-size:13px;color:#888;margin-top:4px"></p>
       <p id="bot-polling" style="font-size:13px;color:#888;margin-top:4px"></p>
-      <div class="qr-box" id="qr-box" style="display:none">
-        <p style="margin-bottom:8px">微信扫码登录：</p>
-        <img id="qr-img" src="" alt="QR Code">
+
+      <!-- 二维码加载中 -->
+      <div id="qr-loading" style="display:none;text-align:center;padding:20px 0;color:#888;font-size:13px">
+        <div style="font-size:28px;margin-bottom:8px;animation:spin 1.2s linear infinite;display:inline-block">⏳</div>
+        <div>二维码已过期，正在获取新的二维码...</div>
       </div>
-      <div style="margin-top:12px">
-        <button class="btn btn-primary" onclick="loginBot()">获取登录二维码</button>
+
+      <!-- 二维码展示 -->
+      <div class="qr-box" id="qr-box" style="display:none">
+        <p style="margin-bottom:8px;font-size:13px;color:#555">请使用微信扫码登录：</p>
+        <img id="qr-img" src="" alt="QR Code">
+        <p style="font-size:11px;color:#aaa;margin-top:8px" id="qr-hint"></p>
+      </div>
+
+      <div style="margin-top:16px;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary" onclick="loginBot()">手动刷新二维码</button>
+        <span id="qr-last-update" style="font-size:12px;color:#aaa"></span>
       </div>
     </div>
   </div>
@@ -830,7 +842,8 @@ function initAdmin() {
       document.querySelectorAll('.tab-content').forEach(x => x.classList.remove('active'))
       document.getElementById('tab-' + a.dataset.tab).classList.add('active')
       if (a.dataset.tab === 'agents') loadAgents()
-      if (a.dataset.tab === 'bot') loadBotStatus()
+      if (a.dataset.tab === 'bot') startBotPoll()
+      else stopBotPoll()
       if (a.dataset.tab === 'api') initDocScrollspy()
     })
   })
@@ -987,6 +1000,36 @@ async function testAgent() {
   }
 }
 
+let lastQrUrl = null
+let botPollTimer = null
+
+function setQrState(state, qrUrl) {
+  const box = document.getElementById('qr-box')
+  const loading = document.getElementById('qr-loading')
+  const img = document.getElementById('qr-img')
+  const hint = document.getElementById('qr-hint')
+  const ts = document.getElementById('qr-last-update')
+
+  if (state === 'hidden') {
+    box.style.display = 'none'
+    loading.style.display = 'none'
+  } else if (state === 'loading') {
+    box.style.display = 'none'
+    loading.style.display = ''
+    ts.textContent = ''
+  } else if (state === 'show' && qrUrl) {
+    loading.style.display = 'none'
+    box.style.display = ''
+    if (qrUrl !== lastQrUrl) {
+      img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(qrUrl)
+      lastQrUrl = qrUrl
+      const now = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      ts.textContent = '更新于 ' + now
+      hint.textContent = '二维码有效期约 2 分钟，过期后将自动刷新'
+    }
+  }
+}
+
 async function loadBotStatus() {
   try {
     const status = await API.get('/api/bot/status')
@@ -996,22 +1039,40 @@ async function loadBotStatus() {
     document.getElementById('bot-account').textContent = status.accountId ? 'Bot 账号：' + status.accountId : ''
     document.getElementById('bot-user').textContent = status.currentUser ? '当前用户：' + status.currentUser : ''
     document.getElementById('bot-polling').textContent = status.polling ? '消息轮询：运行中' : (status.loggedIn ? '消息轮询：未启动' : '')
-    if (status.qrUrl) {
-      document.getElementById('qr-box').style.display = ''
-      document.getElementById('qr-img').src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(status.qrUrl)
+
+    if (status.loggedIn) {
+      setQrState('hidden')
+      stopBotPoll()
+    } else if (status.qrUrl) {
+      setQrState('show', status.qrUrl)
+    } else {
+      // 无二维码：后端正在刷新中，显示 loading
+      setQrState('loading')
     }
-  } catch(e) { toast(e.message, 'error') }
+  } catch(e) { /* 静默忽略，轮询会重试 */ }
+}
+
+function startBotPoll() {
+  if (botPollTimer) return
+  loadBotStatus()
+  botPollTimer = setInterval(loadBotStatus, 4000)
+}
+
+function stopBotPoll() {
+  if (botPollTimer) { clearInterval(botPollTimer); botPollTimer = null }
 }
 
 async function loginBot() {
+  setQrState('loading')
+  document.getElementById('qr-last-update').textContent = ''
+  lastQrUrl = null
   try {
     const data = await API.post('/api/bot/login', {})
     if (data.qrUrl) {
-      document.getElementById('qr-box').style.display = ''
-      document.getElementById('qr-img').src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(data.qrUrl)
+      setQrState('show', data.qrUrl)
       toast('二维码已刷新，请扫码登录')
     }
-  } catch(e) { toast(e.message, 'error') }
+  } catch(e) { toast(e.message, 'error'); setQrState('hidden') }
 }
 
 async function sendNotify() {

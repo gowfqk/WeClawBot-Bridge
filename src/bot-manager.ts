@@ -15,6 +15,8 @@ export class BotManager {
   private currentQrUrl: string | undefined
   private isStarted: boolean = false
   private loginPromise: Promise<unknown> | null = null
+  private qrCallback: ((url: string) => void) | undefined
+  private qrRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(storage: Storage, botAgent?: string) {
     this.bot = new WeChatBot({
@@ -48,15 +50,29 @@ export class BotManager {
   }
 
   async login(onQrUrl?: (url: string) => void): Promise<void> {
+    if (onQrUrl) this.qrCallback = onQrUrl
+
     this.loginPromise = this.bot.login({
       callbacks: {
         onQrUrl: (url: string) => {
           this.currentQrUrl = url
-          onQrUrl?.(url)
+          this.qrCallback?.(url)
         },
         onScanned: () => {},
         onExpired: () => {
           this.currentQrUrl = undefined
+          // 二维码过期后自动刷新，获取新二维码
+          if (!this.status.loggedIn) {
+            if (this.qrRefreshTimer) clearTimeout(this.qrRefreshTimer)
+            this.qrRefreshTimer = setTimeout(() => {
+              this.qrRefreshTimer = null
+              if (!this.status.loggedIn) {
+                this.login().catch((err) => {
+                  console.error('QR auto-refresh failed:', (err as Error).message)
+                })
+              }
+            }, 1500)
+          }
         },
       },
     })
