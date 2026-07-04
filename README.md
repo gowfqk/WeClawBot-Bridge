@@ -8,7 +8,7 @@
 - **OpenAI 兼容**：HTTP Agent 支持 OpenAI 格式（填 base URL 即可），自动补全 `/chat/completions`，支持流式 SSE 输出
 - **Vision 支持**：可将微信图片以 base64 `image_url` 方式传给支持视觉的模型
 - **CLI Agent**：将本地命令行工具（如 `claude`、Python 脚本）直接接入微信，支持持久会话与哨兵结束符
-- **会话管理**：自动维护每用户 × 每 Agent 的对话历史，可配置最大轮次和过期时间
+- **会话管理**：自动维护每用户 × 每 Agent 的对话历史，可配置最大轮次和过期时间；Web 面板支持查看/删除/清空会话，默认永不过期
 - **自动刷新二维码**：微信登录二维码过期后自动重新获取，管理面板实时显示刷新状态
 - **Webhook**：外部程序（GitHub Actions 等）无需 userId，Bot 在线即可推送消息到微信
 - **通知系统**：管理面板一键发送通知，支持文本 / 文件 / 带注释文件
@@ -85,6 +85,17 @@ node dist/index.js
 | `/<命令>` | 切换到对应 Agent（会话历史保留） |
 | 直接发消息 | 与当前 Agent 对话 |
 
+## 管理面板
+
+| 标签页 | 功能 |
+|--------|------|
+| Agent 管理 | 添加/编辑/删除 Agent，在线测试 |
+| Bot 控制 | 查看在线状态、扫码登录、刷新二维码 |
+| 通知管理 | 一键发送通知消息 |
+| **会话管理** | 查看所有会话列表与对话详情，配置过期时间，删除/清空会话 |
+| 设置 | 修改管理密码 |
+| API 参考 | 完整接口文档与示例 |
+
 ## 环境变量
 
 | 变量 | 说明 | 默认值 |
@@ -95,7 +106,7 @@ node dist/index.js
 | `STORAGE_DIR` | 数据存储目录 | `.wechatbot-gateway` |
 | `LOG_LEVEL` | 日志级别 | `info` |
 | `SESSION_MAX_ROUNDS` | 会话最大轮次 | `10` |
-| `SESSION_EXPIRE_MS` | 会话过期时间（毫秒） | `1800000` |
+| `SESSION_EXPIRE_MS` | 会话过期时间（毫秒），`0` = 永不过期 | `0` |
 
 ## API 端点
 
@@ -114,6 +125,11 @@ node dist/index.js
 | PUT | `/api/agents/:id` | 更新 Agent |
 | DELETE | `/api/agents/:id` | 删除 Agent |
 | POST | `/api/agents/:id/test` | 测试 Agent 调用 |
+| GET | `/api/sessions` | 列出所有会话 |
+| GET | `/api/sessions/detail` | 查看会话详情（含对话历史） |
+| DELETE | `/api/sessions/clear` | 删除指定会话或清空全部 |
+| GET | `/api/sessions/config` | 获取会话配置 |
+| PUT | `/api/sessions/config` | 更新会话配置（轮次/过期时间） |
 | POST | `/api/notify` | 发送通知消息 |
 | POST | `/api/webhook` | Webhook 推送（userId 可选） |
 
@@ -123,27 +139,43 @@ node dist/index.js
 # 无需 userId，Bot 在线即可发送
 curl -X POST https://your-domain/api/webhook \
   -H "Content-Type: application/json" \
-  -d '{"text": "部署完成 ✅"}'
+  -d '{"content":{"text":"部署完成 ✅"}}'
 
 # 指定接收人
 curl -X POST https://your-domain/api/webhook \
   -H "Content-Type: application/json" \
-  -d '{"userId": "wxid_xxx", "text": "部署完成 ✅"}'
+  -d '{"userId": "wxid_xxx", "content":{"text":"部署完成 ✅"}}'
 ```
 
-### GitHub Actions 示例
+### GitHub Actions 集成
+
+项目内置 CI workflow（`.github/workflows/ci.yml`），提交到 main 分支时自动构建并推送微信通知。
+
+在仓库 Secrets 中添加 `WECLAW_WEBHOOK_URL` 指向你的 webhook 地址即可启用。
 
 ```yaml
+# 手动集成示例
 - name: 微信通知
   run: |
     curl -s -X POST ${{ secrets.WECLAW_WEBHOOK_URL }} \
       -H "Content-Type: application/json" \
-      -d "{\"text\": \"[${{ github.repository }}] ${{ github.workflow }} 完成\"}"
+      -d "{\"content\":{\"text\":\"✅ [${{ github.repository }}] 部署成功\"}}"
 ```
+
+## 会话管理
+
+会话按「用户 × Agent」独立维护，支持在 Web 面板中管理：
+
+- **配置**：设置最大对话轮次和过期时间（可设为永不过期），配置持久化保存
+- **列表**：查看所有活跃会话，显示消息数、最后活跃时间、过期状态
+- **详情**：查看完整对话历史，区分用户/助手消息及时间戳
+- **操作**：逐条删除或一键清空全部会话
+
+默认配置：最大 10 轮对话，永不过期。
 
 ## 技术栈
 
-- **运行时**：Node.js 20 + TypeScript
+- **运行时**：Node.js 22 + TypeScript
 - **框架**：Express.js
 - **安全**：Helmet（CSP / 安全头）、CSRF 防护
 - **日志**：Pino（结构化 JSON）

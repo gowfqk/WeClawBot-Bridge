@@ -392,6 +392,7 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-fa
         <a class="doc-toc-link" href="#doc-auth">认证</a>
         <a class="doc-toc-link" href="#doc-api-bot">Bot API</a>
         <a class="doc-toc-link" href="#doc-api-agents">Agent API</a>
+        <a class="doc-toc-link" href="#doc-api-sessions">会话 API</a>
         <a class="doc-toc-link" href="#doc-api-notify">通知 API</a>
         <a class="doc-toc-link" href="#doc-webhook">Webhook</a>
         <a class="doc-toc-link" href="#doc-env">环境变量</a>
@@ -608,6 +609,69 @@ curl -X POST /api/auth/login \
 {"text": "你好！我是 GPT-4o，有什么可以帮你？", "elapsed": 1234}</pre></div>
         </section>
 
+        <!-- 会话 API -->
+        <section id="doc-api-sessions" class="doc-section">
+          <h2 class="doc-h2">💬 会话 API</h2>
+          <p class="doc-p">管理用户与 Agent 之间的对话会话，支持查看历史、配置过期策略。</p>
+
+          <div class="doc-endpoint">
+            <span class="doc-method get">GET</span><code>/api/sessions</code>
+          </div>
+          <p class="doc-p">列出所有会话摘要（userId、agentId、消息数、最后活跃时间）。</p>
+          <div class="doc-code-block"><pre>[
+  {
+    "userId": "wxid_xxx",
+    "agentId": "gpt",
+    "messageCount": 12,
+    "lastActive": 1710000000000
+  }
+]</pre></div>
+
+          <div class="doc-endpoint">
+            <span class="doc-method get">GET</span><code>/api/sessions/detail?userId=&agentId=</code>
+          </div>
+          <p class="doc-p">查看指定会话的完整对话历史。</p>
+          <div class="doc-code-block"><pre>{
+  "userId": "wxid_xxx",
+  "agentId": "gpt",
+  "history": [
+    { "role": "user", "content": "你好", "timestamp": 1710000000000 },
+    { "role": "assistant", "content": "你好！有什么可以帮你？", "timestamp": 1710000001000 }
+  ],
+  "lastActive": 1710000001000
+}</pre></div>
+
+          <div class="doc-endpoint">
+            <span class="doc-method del">DELETE</span><code>/api/sessions/clear</code>
+          </div>
+          <p class="doc-p">删除指定会话（传入 userId + agentId）或清空全部（空 body）。</p>
+          <div class="doc-code-block"><pre># 删除单个会话
+curl -X DELETE /api/sessions/clear \
+  -H "Authorization: Bearer ***" \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "wxid_xxx", "agentId": "gpt"}'
+
+# 清空全部会话
+curl -X DELETE /api/sessions/clear \
+  -H "Authorization: Bearer ***"</pre></div>
+
+          <div class="doc-endpoint">
+            <span class="doc-method get">GET</span><code>/api/sessions/config</code>
+          </div>
+          <p class="doc-p">获取当前会话配置。</p>
+          <div class="doc-code-block"><pre>{"maxRounds": 10, "expireMs": 0}</pre></div>
+
+          <div class="doc-endpoint">
+            <span class="doc-method put">PUT</span><code>/api/sessions/config</code>
+          </div>
+          <p class="doc-p">更新会话配置（maxRounds / expireMs），持久化保存。expireMs 设为 0 表示永不过期。</p>
+          <div class="doc-code-block"><pre># 设永不过期，最大 20 轮
+curl -X PUT /api/sessions/config \
+  -H "Authorization: Bearer ***" \
+  -H "Content-Type: application/json" \
+  -d '{"maxRounds": 20, "expireMs": 0}'</pre></div>
+        </section>
+
         <!-- 通知 API -->
         <section id="doc-api-notify" class="doc-section">
           <h2 class="doc-h2">🔔 通知 API</h2>
@@ -646,11 +710,14 @@ curl -X POST /api/notify \
           <div class="doc-tip">💡 <code>userId</code> 留空时，自动向当前 Bot 登录的微信账号本身发消息（方便自用场景）。</div>
 
           <h3 class="doc-h3">GitHub Actions 集成示例</h3>
-          <div class="doc-code-block"><pre>- name: 通知微信
+          <p class="doc-p">项目已内置 CI workflow（<code>.github/workflows/ci.yml</code>），push 到 main 时自动构建并推送微信通知。只需在仓库 Secrets 中添加 <code>WECLAW_WEBHOOK_URL</code> 即可。</p>
+          <div class="doc-code-block"><pre># .github/workflows/ci.yml 中的通知步骤
+- name: 通知微信
+  if: success()
   run: |
-    curl -X POST https://your-domain/api/webhook \
+    curl -s -X POST ${{ secrets.WECLAW_WEBHOOK_URL }} \
       -H "Content-Type: application/json" \
-      -d '{"content":{"text":"✅ ${{ github.repository }} 部署成功"}}'</pre></div>
+      -d '{"content":{"text":"✅ CI 通过"}}'</pre></div>
         </section>
 
         <!-- 环境变量 -->
@@ -665,7 +732,7 @@ curl -X POST /api/notify \
               <tr><td><code>STORAGE_DIR</code></td><td>.wechatbot-gateway</td><td>数据持久化目录</td></tr>
               <tr><td><code>LOG_LEVEL</code></td><td>info</td><td>日志级别：trace / debug / info / warn / error</td></tr>
               <tr><td><code>SESSION_MAX_ROUNDS</code></td><td>10</td><td>每个 Agent 保留的最大对话轮次</td></tr>
-              <tr><td><code>SESSION_EXPIRE_MS</code></td><td>1800000</td><td>会话过期时间（毫秒），默认 30 分钟</td></tr>
+              <tr><td><code>SESSION_EXPIRE_MS</code></td><td>0</td><td>会话过期时间（毫秒），0 = 永不过期</td></tr>
               <tr><td><code>ALLOWED_ORIGINS</code></td><td>—</td><td>CORS 允许的来源，逗号分隔</td></tr>
             </tbody>
           </table>
