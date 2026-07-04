@@ -113,6 +113,18 @@ export class AgentRegistry {
     }
   }
 
+  private resolveEndpoint(agent: AgentConfig): string {
+    let url = agent.endpoint || ''
+    if (agent.format === 'openai') {
+      // 用户填写 base URL（如 https://api.openai.com/v1），
+      // 自动补全为 /chat/completions
+      if (!url.endsWith('/chat/completions')) {
+        url = url.replace(/\/+$/, '') + '/chat/completions'
+      }
+    }
+    return url
+  }
+
   private async invokeHttp(agent: AgentConfig, payload: AgentPayload): Promise<AgentResponse> {
     if (!agent.endpoint) {
       return { reply: { text: 'Agent 未配置端点地址。' } }
@@ -132,8 +144,9 @@ export class AgentRegistry {
       }
 
       const body = this.buildRequestBody(agent, payload)
+      const url = this.resolveEndpoint(agent)
 
-      const response = await fetch(agent.endpoint, {
+      const response = await fetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
