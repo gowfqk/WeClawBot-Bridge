@@ -373,7 +373,12 @@ export function createServer(
         res.status(404).json({ error: 'Agent not found' })
         return
       }
-      const updated = { ...existing, ...req.body, id: existing.id }
+      // 将 null 转为 undefined 以便清空可选字段
+      const body = { ...req.body }
+      for (const [k, v] of Object.entries(body)) {
+        if (v === null) (body as Record<string, unknown>)[k] = undefined
+      }
+      const updated = { ...existing, ...body, id: existing.id }
       agentRegistry.unregister(existing.id)
       agentRegistry.register(updated)
       commandHandler.updateAgents(agentRegistry.listAll())

@@ -1075,11 +1075,11 @@ async function submitAgent() {
   if (type === 'http') {
     agent.endpoint = document.getElementById('add-endpoint').value
     agent.timeout = parseInt(document.getElementById('add-timeout').value) || 30000
-    agent.apiKey = document.getElementById('add-api-key').value || undefined
-    agent.model = document.getElementById('add-model').value || undefined
+    agent.apiKey = document.getElementById('add-api-key').value.trim() || null
+    agent.model = document.getElementById('add-model').value.trim() || null
   } else {
     agent.cliCommand = document.getElementById('add-cli-command').value
-    agent.cliWorkDir = document.getElementById('add-cli-workdir').value || undefined
+    agent.cliWorkDir = document.getElementById('add-cli-workdir').value.trim() || null
     agent.cliArgs = document.getElementById('add-cli-args').value.split(',').map(s => s.trim()).filter(Boolean)
     agent.cliMode = document.getElementById('add-cli-mode').value
     agent.timeout = parseInt(document.getElementById('add-cli-timeout').value) || 60000
