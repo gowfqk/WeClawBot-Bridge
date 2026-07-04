@@ -391,10 +391,15 @@ export function createServer(
   })
 
   app.delete('/api/agents/:id', dynamicAuth, (req, res) => {
-    agentRegistry.unregister(req.params.id as string)
-    commandHandler.updateAgents(agentRegistry.listAll())
-    saveAgents(agentRegistry.listAll(), config.defaultAgentId)
-    res.json({ ok: true })
+    try {
+      agentRegistry.unregister(req.params.id as string)
+      commandHandler.updateAgents(agentRegistry.listAll())
+      saveAgents(agentRegistry.listAll(), config.defaultAgentId)
+      res.json({ ok: true })
+    } catch (err) {
+      const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
   })
 
   app.post('/api/agents/:id/test', dynamicAuth, async (req, res) => {
