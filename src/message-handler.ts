@@ -54,8 +54,7 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
           return
         }
         await userState.switchAgent(userId, result.targetAgentId)
-        await sessionManager.clear(userId, result.targetAgentId)
-        await reply(`已切换到${agent.name} Agent。`)
+        await reply(`已切换到${agent.name} Agent，会话历史已保留。`)
         return
       }
 

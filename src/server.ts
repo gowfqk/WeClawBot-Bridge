@@ -405,14 +405,12 @@ export function createServer(
     try {
       const { userId, text, content } = req.body
 
-      // 优先使用提供的userId，否则使用当前Bot用户
-      const recipient = userId || (() => {
-        const botStatus = botManager.getStatus()
-        return botStatus.loggedIn ? botStatus.currentUser : null
-      })()
-      
+      // userId 可选；未提供时发给 Bot 当前登录账号（即管理员自己）
+      const botStatus = botManager.getStatus()
+      const recipient: string | null = userId || (botStatus.loggedIn ? (botStatus.currentUser ?? null) : null)
+
       if (!recipient) {
-        res.status(400).json({ error: 'userId is required or Bot not logged in' })
+        res.status(503).json({ error: 'Bot 未登录，无法发送通知。请先扫码登录。' })
         return
       }
 
