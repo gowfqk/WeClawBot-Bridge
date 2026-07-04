@@ -56,6 +56,72 @@ th{color:#888;font-weight:500;font-size:12px;text-transform:uppercase}
 .empty{text-align:center;color:#999;padding:40px;font-size:14px}
 code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-family:'SF Mono',monospace}
 
+/* ===== 顶部栏 ===== */
+.topbar{background:#f8f9fa;padding:12px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:10}
+.topbar-title{font-size:14px;font-weight:500;color:#333;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar-right{display:flex;align-items:center;gap:12px;flex-shrink:0}
+.topbar-status{display:flex;align-items:center;gap:4px;font-size:12px;color:#555}
+.status-dot{width:8px;height:8px;background:#10b981;border-radius:50%;flex-shrink:0}
+.topbar-logout{padding:4px 12px;font-size:12px}
+
+/* ===== 移动端适配 ===== */
+@media(max-width:767px){
+  /* 整体布局 */
+  body{flex-direction:column}
+  main{padding:12px;padding-bottom:72px;overflow-y:auto;height:100vh;flex:1}
+
+  /* 侧边栏 → 底部标签栏 */
+  nav{
+    position:fixed;bottom:0;left:0;right:0;
+    width:100%!important;
+    height:58px;
+    flex-direction:row;
+    padding:0;
+    z-index:100;
+    display:flex;
+    overflow:visible;
+    border-top:1px solid #0f0f1e;
+  }
+  nav h2,.nav-toggle{display:none}
+  nav a{
+    flex:1;flex-direction:column;
+    padding:6px 4px 4px;
+    gap:2px;
+    justify-content:center;align-items:center;
+    font-size:10px;white-space:nowrap;overflow:visible;
+  }
+  nav a .nav-icon{font-size:20px;width:auto}
+  nav a .nav-label{font-size:10px;opacity:1!important;pointer-events:auto}
+
+  /* 顶栏精简 */
+  .topbar{padding:10px 14px}
+  .topbar-title{font-size:13px}
+
+  /* 卡片收紧 */
+  .card{padding:14px;border-radius:6px}
+
+  /* 表单双列→单列 */
+  .form-row{grid-template-columns:1fr;gap:0}
+
+  /* 表格横向滚动 */
+  .card table,.doc-section table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%}
+
+  /* Toast 位置上移（避开底栏） */
+  .toast{bottom:70px;right:12px;left:12px;text-align:center}
+
+  /* 文档页 */
+  .doc-layout{flex-direction:column}
+  .doc-toc{display:none}
+  .doc-feature-grid{grid-template-columns:1fr}
+  .doc-section{padding:14px}
+  .doc-h2{font-size:15px}
+  .doc-code-block{border-radius:6px;padding:10px 12px}
+  .doc-code-block pre{font-size:11px}
+
+  /* 登录弹窗 */
+  .login-box{padding:28px 20px}
+}
+
 /* ===== 文档页样式 ===== */
 .doc-layout{display:flex;gap:24px;align-items:flex-start}
 .doc-toc{width:160px;flex-shrink:0;position:sticky;top:0;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;font-size:13px}
@@ -147,16 +213,14 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-fa
   <a data-tab="api"><span class="nav-icon">📖</span><span class="nav-label">API 参考</span></a>
 </nav>
 <main>
-  <div style="background:#f8f9fa;padding:12px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:between;">
-    <div style="font-size:14px;font-weight:500;color:#333;flex:1;">
-      🤖 WeClawBot Bridge - 管理面板
-    </div>
-    <div style="display:flex;align-items:center;gap:16px;font-size:12px;">
-      <span id="connection-status" style="display:flex;align-items:center;gap:4px;">
-        <span style="width:8px;height:8px;background:#10b981;border-radius:50%;" id="status-dot"></span>
+  <div class="topbar">
+    <div class="topbar-title">🤖 WeClawBot Bridge</div>
+    <div class="topbar-right">
+      <span id="connection-status" class="topbar-status">
+        <span id="status-dot" class="status-dot"></span>
         <span id="status-text">连接中...</span>
       </span>
-      <button class="btn btn-secondary" style="padding:4px 12px;font-size:12px" onclick="doLogout()">退出登录</button>
+      <button class="btn btn-secondary topbar-logout" onclick="doLogout()">退出</button>
     </div>
   </div>
 
