@@ -234,7 +234,7 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-fa
         <div class="form-group"><label>名称</label><input id="add-name" placeholder="例如 OpenClaw 主实例"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>切换命令</label><input id="add-command" placeholder="例如 openclaw (用户发送 /openclaw)"></div>
+        <div class="form-group"><label>切换命令</label><input id="add-command" placeholder="例如 openclaw (用户发送 #openclaw)"></div>
         <div class="form-group"><label>类型</label><select id="add-type" onchange="toggleAgentFields()">
           <option value="http">HTTP</option><option value="cli">CLI</option>
         </select></div>
@@ -404,12 +404,12 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-fa
         <!-- 功能概览 -->
         <section id="doc-overview" class="doc-section">
           <h2 class="doc-h2">🤖 功能概览</h2>
-          <p class="doc-p">WeClawBot Bridge 是一个微信 ↔ AI Agent 桥接网关，支持在单个微信 Bot 账号上接入多种 AI 服务，用户在微信中通过 <code>/命令</code> 自由切换。</p>
+          <p class="doc-p">WeClawBot Bridge 是一个微信 ↔ AI Agent 桥接网关，支持在单个微信 Bot 账号上接入多种 AI 服务，用户在微信中通过 <code>#命令</code> 自由切换。</p>
           <div class="doc-feature-grid">
             <div class="doc-feature-card">
               <div class="doc-feature-icon">🔀</div>
               <div class="doc-feature-title">多 Agent 切换</div>
-              <div class="doc-feature-desc">一个 Bot 接入多套 AI，发 <code>/命令</code> 随时切换，各自独立维护对话历史。</div>
+              <div class="doc-feature-desc">一个 Bot 接入多套 AI，发 <code>#命令</code> 随时切换，各自独立维护对话历史。</div>
             </div>
             <div class="doc-feature-card">
               <div class="doc-feature-icon">🌐</div>
@@ -436,10 +436,10 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-fa
           <table>
             <thead><tr><th>命令</th><th>说明</th></tr></thead>
             <tbody>
-              <tr><td><code>/help</code></td><td>显示帮助信息与可用命令列表</td></tr>
-              <tr><td><code>/agents</code></td><td>列出所有已注册的 Agent</td></tr>
-              <tr><td><code>/status</code></td><td>查看 Bot 当前在线状态</td></tr>
-              <tr><td><code>/&lt;命令&gt;</code></td><td>切换到对应 Agent（命令在管理面板中配置）</td></tr>
+              <tr><td><code>#help</code></td><td>显示帮助信息与可用命令列表</td></tr>
+              <tr><td><code>#agents</code></td><td>列出所有已注册的 Agent</td></tr>
+              <tr><td><code>#status</code></td><td>查看 Bot 当前在线状态</td></tr>
+              <tr><td><code>#&lt;命令&gt;</code></td><td>切换到对应 Agent（命令在管理面板中配置）</td></tr>
               <tr><td>任意文字/图片</td><td>转发给当前激活的 Agent 并回复结果</td></tr>
             </tbody>
           </table>
@@ -455,7 +455,7 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-fa
           <div class="doc-code-block"><pre>{
   "id": "my-gpt",
   "name": "GPT-4o",
-  "command": "gpt",          <span class="doc-comment">// 微信发 /gpt 切换</span>
+  "command": "gpt",          <span class="doc-comment">// 微信发 #gpt 切换</span>
   "type": "http",
   "description": "OpenAI GPT-4o",
   "endpoint": "https://api.openai.com/v1/chat/completions",
@@ -1066,7 +1066,7 @@ async function loadAgents() {
       return
     }
     tbody.innerHTML = agents.map(a => `<tr>
-      <td><code>/${a.command}</code></td>
+      <td><code>#${a.command}</code></td>
       <td>${a.name}</td>
       <td><span class="badge badge-${a.type || 'http'}">${a.type || 'http'}</span></td>
       <td style="color:#888">${a.description}</td>
@@ -1075,7 +1075,7 @@ async function loadAgents() {
       <td><button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;margin-right:4px" onclick="editAgent('${a.id}')">编辑</button><button class="btn btn-danger" style="padding:4px 10px;font-size:12px" onclick="removeAgent('${a.id}')">删除</button></td>
     </tr>`).join('')
     const sel = document.getElementById('test-agent-select')
-    sel.innerHTML = '<option value="">-- 请选择 --</option>' + agents.map(a => `<option value="${a.id}">/${a.command} - ${a.name}</option>`).join('')
+    sel.innerHTML = '<option value="">-- 请选择 --</option>' + agents.map(a => `<option value="${a.id}">#${a.command} - ${a.name}</option>`).join('')
   } catch(e) { toast(e.message, 'error') }
 }
 

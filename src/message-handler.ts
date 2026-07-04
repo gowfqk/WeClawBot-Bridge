@@ -50,7 +50,7 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
       if (result.type === 'switch' && result.targetAgentId) {
         const agent = agentRegistry.get(result.targetAgentId)
         if (!agent) {
-          await reply('未知的 Agent，发送 /agents 查看可用列表。')
+          await reply('未知的 Agent，发送 #agents 查看可用列表。')
           return
         }
         await userState.switchAgent(userId, result.targetAgentId)
@@ -59,13 +59,13 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
       }
 
       if (result.type === 'unknown') {
-        await reply('未知的 Agent，发送 /agents 查看可用列表。')
+        await reply('未知的 Agent，发送 #agents 查看可用列表。')
         return
       }
 
       const currentAgentId = await userState.getCurrentAgent(userId)
       if (!currentAgentId) {
-        await reply('请先选择一个 Agent。发送 /agents 查看可用列表。')
+        await reply('请先选择一个 Agent。发送 #agents 查看可用列表。')
         return
       }
 

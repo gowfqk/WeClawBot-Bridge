@@ -4,7 +4,7 @@
 
 ## 功能特性
 
-- **多 Agent 切换**：在微信中发 `/命令` 随时切换不同 AI，各自独立维护对话历史，切换不清空上下文
+- **多 Agent 切换**：在微信中发 `#命令` 随时切换不同 AI，各自独立维护对话历史，切换不清空上下文
 - **OpenAI 兼容**：HTTP Agent 支持 OpenAI 格式（填 base URL 即可），自动补全 `/chat/completions`，支持流式 SSE 输出
 - **Vision 支持**：可将微信图片以 base64 `image_url` 方式传给支持视觉的模型
 - **CLI Agent**：将本地命令行工具（如 `claude`、Python 脚本）直接接入微信，支持持久会话与哨兵结束符
@@ -79,10 +79,10 @@ node dist/index.js
 
 | 命令 | 功能 |
 |------|------|
-| `/help` | 显示帮助 |
-| `/agents` | 列出所有 Agent |
-| `/status` | 查看 Bot 状态 |
-| `/<命令>` | 切换到对应 Agent（会话历史保留） |
+| `#help` | 显示帮助 |
+| `#agents` | 列出所有 Agent |
+| `#status` | 查看 Bot 状态 |
+| `#<命令>` | 切换到对应 Agent（会话历史保留） |
 | 直接发消息 | 与当前 Agent 对话 |
 
 ## 管理面板

@@ -31,19 +31,19 @@ export class CommandHandler {
   parse(text: string): CommandResult {
     const trimmed = text.trim()
 
-    if (trimmed === '/help' || trimmed === '/h') {
+    if (trimmed === '#help' || trimmed === '#h') {
       return { type: 'help' }
     }
 
-    if (trimmed === '/agents' || trimmed === '/a') {
+    if (trimmed === '#agents' || trimmed === '#a') {
       return { type: 'agents' }
     }
 
-    if (trimmed === '/status') {
+    if (trimmed === '#status') {
       return { type: 'status' }
     }
 
-    if (trimmed.startsWith('/')) {
+    if (trimmed.startsWith('#')) {
       const command = trimmed.slice(1).toLowerCase()
 
       if (command === 'help' || command === 'h') {
@@ -75,10 +75,10 @@ export class CommandHandler {
     lines.push('=== WeClawBot Bridge ===')
     lines.push('')
     lines.push('系统命令：')
-    lines.push('  /help 或 /h  — 显示此帮助')
-    lines.push('  /status      — 查看 Bot 在线状态')
-    lines.push('  /agents 或 /a — 列出所有 Agent')
-    lines.push('  /agent名     — 切换到指定 Agent')
+    lines.push('  #help 或 #h  — 显示此帮助')
+    lines.push('  #status      — 查看 Bot 在线状态')
+    lines.push('  #agents 或 #a — 列出所有 Agent')
+    lines.push('  #agent名     — 切换到指定 Agent')
     lines.push('')
     lines.push('切换 Agent 后直接发送消息即可与对应 AI 对话。')
 
@@ -95,11 +95,11 @@ export class CommandHandler {
     lines.push('=== 可用 Agent ===')
     lines.push('')
     for (const agent of this.agents) {
-      lines.push(`  /${agent.command} — ${agent.name}`)
+      lines.push(`  #${agent.command} — ${agent.name}`)
       lines.push(`    ${agent.description}`)
     }
     lines.push('')
-    lines.push('发送 /agent名 即可切换 Agent。')
+    lines.push('发送 #agent名 即可切换 Agent。')
 
     return lines.join('\n')
   }
