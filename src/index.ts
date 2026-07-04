@@ -63,6 +63,7 @@ async function main(): Promise<void> {
     commandHandler,
     notificationService,
     rawStorage,
+    sessionManager,
     logger,
   )
 

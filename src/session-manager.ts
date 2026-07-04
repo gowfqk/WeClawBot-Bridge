@@ -2,10 +2,23 @@ import type { Storage, Session, ChatEntry } from './types'
 
 const SESSION_KEY_PREFIX = 'session:'
 const CONTEXT_TOKEN_KEY_PREFIX = 'context_token:'
+const SESSION_CONFIG_KEY = 'session:config'
 
 interface CacheEntry {
   session: Session
   expires: number
+}
+
+export interface SessionSummary {
+  userId: string
+  agentId: string
+  messageCount: number
+  lastActive: number
+}
+
+export interface SessionConfig {
+  maxRounds: number
+  expireMs: number
 }
 
 export class SessionManager {
@@ -112,6 +125,8 @@ export class SessionManager {
   }
 
   isExpired(session: Session): boolean {
+    // expireMs <= 0 表示永不过期
+    if (this.expireMs <= 0) return false
     return Date.now() - session.lastActive > this.expireMs
   }
 
@@ -122,5 +137,90 @@ export class SessionManager {
 
   async setContextToken(userId: string, token: string): Promise<void> {
     await this.storage.set(this.contextTokenKey(userId), token)
+  }
+
+  // ===== 会话管理方法 =====
+
+  /** 列出所有会话摘要 */
+  async listSessions(): Promise<SessionSummary[]> {
+    const keys = await this.storage.listKeys(SESSION_KEY_PREFIX)
+    const sessions: SessionSummary[] = []
+
+    for (const key of keys) {
+      // key 格式: session:userId:agentId
+      const parts = key.slice(SESSION_KEY_PREFIX.length).split(':')
+      if (parts.length < 2) continue
+      const userId = parts[0]
+      const agentId = parts.slice(1).join(':') // agentId 可能包含冒号
+
+      const session = await this.storage.get<Session>(key)
+      if (session) {
+        sessions.push({
+          userId,
+          agentId,
+          messageCount: session.history.length,
+          lastActive: session.lastActive,
+        })
+      }
+    }
+
+    // 按最后活跃时间降序排列
+    sessions.sort((a, b) => b.lastActive - a.lastActive)
+    return sessions
+  }
+
+  /** 获取单个会话详情 */
+  async getSessionDetail(userId: string, agentId: string): Promise<Session | null> {
+    const key = this.sessionKey(userId, agentId)
+    const session = await this.storage.get<Session>(key)
+    if (!session) return null
+
+    // 检查是否过期（如果配置了永不过期则不检查）
+    if (this.isExpired(session)) return null
+
+    return session
+  }
+
+  /** 删除会话 */
+  async deleteSession(userId: string, agentId: string): Promise<boolean> {
+    const key = this.sessionKey(userId, agentId)
+    const exists = await this.storage.has(key)
+    if (!exists) return false
+
+    await this.storage.delete(key)
+    this.cache.delete(key)
+    return true
+  }
+
+  /** 清空所有会话 */
+  async clearAllSessions(): Promise<number> {
+    const keys = await this.storage.listKeys(SESSION_KEY_PREFIX)
+    for (const key of keys) {
+      await this.storage.delete(key)
+      this.cache.delete(key)
+    }
+    return keys.length
+  }
+
+  /** 获取会话配置 */
+  async getConfig(): Promise<SessionConfig> {
+    // 优先从存储读取运行时配置
+    const stored = await this.storage.get<SessionConfig>(SESSION_CONFIG_KEY)
+    if (stored) {
+      this.maxRounds = stored.maxRounds
+      this.expireMs = stored.expireMs
+      return stored
+    }
+    return { maxRounds: this.maxRounds, expireMs: this.expireMs }
+  }
+
+  /** 更新会话配置（持久化） */
+  async updateConfig(maxRounds?: number, expireMs?: number): Promise<SessionConfig> {
+    if (maxRounds !== undefined) this.maxRounds = maxRounds
+    if (expireMs !== undefined) this.expireMs = expireMs
+
+    const config: SessionConfig = { maxRounds: this.maxRounds, expireMs: this.expireMs }
+    await this.storage.set(SESSION_CONFIG_KEY, config)
+    return config
   }
 }

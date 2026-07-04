@@ -4,6 +4,7 @@ import type { BotManager } from './bot-manager'
 import type { AgentRegistry } from './agent-registry'
 import type { CommandHandler } from './command-handler'
 import type { NotificationService } from './notification'
+import type { SessionManager } from './session-manager'
 import type { AppConfig } from './config'
 import { saveAgents } from './config'
 import type { Storage } from './types'
@@ -24,6 +25,7 @@ export function createServer(
   commandHandler: CommandHandler,
   notificationService: NotificationService,
   storage: Storage,
+  sessionManager: SessionManager,
   logger: Logger,
 ) {
   const app = express()
@@ -417,6 +419,75 @@ export function createServer(
       const sendContent = content || { text: text || 'empty' }
       await notificationService.send(recipient, sendContent)
       res.json({ ok: true, recipient })
+    } catch (err) {
+      const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
+  })
+
+  // ===== 会话管理 API =====
+  app.get('/api/sessions', dynamicAuth, async (_req, res) => {
+    try {
+      const sessions = await sessionManager.listSessions()
+      res.json(sessions)
+    } catch (err) {
+      const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
+  })
+
+  app.get('/api/sessions/detail', dynamicAuth, async (req, res) => {
+    try {
+      const { userId, agentId } = req.query
+      if (!userId || !agentId) {
+        res.status(400).json({ error: 'userId and agentId are required' })
+        return
+      }
+      const session = await sessionManager.getSessionDetail(userId as string, agentId as string)
+      if (!session) {
+        res.status(404).json({ error: 'Session not found' })
+        return
+      }
+      res.json(session)
+    } catch (err) {
+      const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
+  })
+
+  app.delete('/api/sessions/clear', dynamicAuth, async (req, res) => {
+    try {
+      const { userId, agentId } = req.body
+      if (userId && agentId) {
+        // 删除指定会话
+        const deleted = await sessionManager.deleteSession(userId, agentId)
+        res.json({ ok: true, deleted })
+      } else {
+        // 清空所有会话
+        const count = await sessionManager.clearAllSessions()
+        res.json({ ok: true, cleared: count })
+      }
+    } catch (err) {
+      const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
+  })
+
+  app.get('/api/sessions/config', dynamicAuth, async (_req, res) => {
+    try {
+      const config = await sessionManager.getConfig()
+      res.json(config)
+    } catch (err) {
+      const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
+  })
+
+  app.put('/api/sessions/config', dynamicAuth, async (req, res) => {
+    try {
+      const { maxRounds, expireMs } = req.body
+      const config = await sessionManager.updateConfig(maxRounds, expireMs)
+      res.json(config)
     } catch (err) {
       const error = err as Error
       res.status(500).json({ error: error.message })

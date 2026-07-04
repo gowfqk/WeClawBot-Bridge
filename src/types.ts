@@ -117,4 +117,5 @@ export interface Storage {
   delete(key: string): Promise<void>
   has(key: string): Promise<boolean>
   clear(): Promise<void>
+  listKeys(prefix?: string): Promise<string[]>
 }

@@ -30,6 +30,12 @@ export class MemoryStorage implements Storage {
   async clear(): Promise<void> {
     this.store.clear()
   }
+
+  async listKeys(prefix?: string): Promise<string[]> {
+    const keys = Array.from(this.store.keys())
+    if (prefix) return keys.filter(k => k.startsWith(prefix))
+    return keys
+  }
 }
 
 export class FileStorage implements Storage {
@@ -89,6 +95,20 @@ export class FileStorage implements Storage {
       // dir not found, ok
     }
   }
+
+  async listKeys(prefix?: string): Promise<string[]> {
+    const dir = path.join(this.baseDir, this.namespace)
+    try {
+      const files = await fs.readdir(dir)
+      const keys = files
+        .filter(f => f.endsWith('.json'))
+        .map(f => f.slice(0, -5)) // remove .json extension
+      if (prefix) return keys.filter(k => k.startsWith(prefix))
+      return keys
+    } catch {
+      return []
+    }
+  }
 }
 
 export class EncryptedStorage implements Storage {
@@ -146,5 +166,9 @@ export class EncryptedStorage implements Storage {
 
   async clear(): Promise<void> {
     await this.inner.clear()
+  }
+
+  async listKeys(prefix?: string): Promise<string[]> {
+    return this.inner.listKeys(prefix)
   }
 }

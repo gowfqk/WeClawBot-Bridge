@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      # 测试暂跳过（项目暂无测试用例），加上后取消注释:
+      # - run: npm test
+
+      # ===== 微信通知 =====
+      - name: 通知成功
+        if: success()
+        run: |
+          curl -s -X POST ${{ secrets.WECLAW_WEBHOOK_URL }} \
+            -H "Content-Type: application/json" \
+            -d "{\"content\":{\"text\":\"✅ [${{ github.repository }}] CI 通过\\n分支：${{ github.ref_name }}\\n提交：${{ github.sha }}\"}}"
+
+      - name: 通知失败
+        if: failure()
+        run: |
+          curl -s -X POST ${{ secrets.WECLAW_WEBHOOK_URL }} \
+            -H "Content-Type: application/json" \
+            -d "{\"content\":{\"text\":\"❌ [${{ github.repository }}] CI 失败\\n分支：${{ github.ref_name }}\\n提交：${{ github.sha }}\\n请检查 Actions 日志\"}}"

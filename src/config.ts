@@ -91,7 +91,7 @@ export function loadConfig(configPath?: string): AppConfig {
     agents,
     defaultAgentId,
     sessionMaxRounds: env.sessionMaxRounds || 10,
-    sessionExpireMs: env.sessionExpireMs || 30 * 60 * 1000,
+    sessionExpireMs: env.sessionExpireMs || 0,  // 0 = 永不过期
   }
 
   return cachedConfig

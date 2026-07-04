@@ -210,6 +210,7 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-fa
   <a class="active" data-tab="agents"><span class="nav-icon">🤖</span><span class="nav-label">Agent 管理</span></a>
   <a data-tab="bot"><span class="nav-icon">📱</span><span class="nav-label">Bot 控制</span></a>
   <a data-tab="notify"><span class="nav-icon">🔔</span><span class="nav-label">通知管理</span></a>
+  <a data-tab="sessions"><span class="nav-icon">💬</span><span class="nav-label">会话管理</span></a>
   <a data-tab="settings"><span class="nav-icon">⚙️</span><span class="nav-label">设置</span></a>
   <a data-tab="api"><span class="nav-icon">📖</span><span class="nav-label">API 参考</span></a>
 </nav>
@@ -328,6 +329,43 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-fa
       <div style="text-align:center;color:#999;padding:40px;font-size:14px;">
         通知规则功能正在开发中
       </div>
+    </div>
+  </div>
+
+  <div id="tab-sessions" class="tab-content">
+    <div class="card">
+      <h3>会话配置</h3>
+      <div class="form-row">
+        <div class="form-group"><label>最大对话轮次</label><input id="sessions-max-rounds" type="number" min="1" value="10"></div>
+        <div class="form-group"><label>过期时间</label><select id="sessions-expire">
+          <option value="0">永不过期</option>
+          <option value="1800000">30 分钟</option>
+          <option value="3600000">1 小时</option>
+          <option value="7200000">2 小时</option>
+          <option value="86400000">24 小时</option>
+          <option value="604800000">7 天</option>
+          <option value="0">永不过期</option>
+        </select></div>
+      </div>
+      <button class="btn btn-primary" onclick="saveSessionConfig()">保存配置</button>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <h3 style="margin:0">会话列表 (<span id="session-count">0</span>)</h3>
+        <div>
+          <button class="btn btn-secondary" onclick="loadSessions()" style="margin-right:8px">刷新</button>
+          <button class="btn btn-danger" onclick="clearAllSessions()">清空全部</button>
+        </div>
+      </div>
+      <table><thead><tr><th>用户ID</th><th>Agent</th><th>消息数</th><th>最后活跃</th><th>过期状态</th><th>操作</th></tr></thead>
+      <tbody id="session-list"><tr><td colspan="6" class="empty">加载中...</td></tr></tbody></table>
+    </div>
+    <div class="card" id="session-detail-card" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <h3 style="margin:0">会话详情：<span id="detail-title"></span></h3>
+        <button class="btn btn-secondary" onclick="document.getElementById('session-detail-card').style.display='none'">关闭</button>
+      </div>
+      <div id="session-detail-content"></div>
     </div>
   </div>
 
@@ -844,6 +882,7 @@ function initAdmin() {
       if (a.dataset.tab === 'agents') loadAgents()
       if (a.dataset.tab === 'bot') startBotPoll()
       else stopBotPoll()
+      if (a.dataset.tab === 'sessions') { loadSessionConfig(); loadSessions() }
       if (a.dataset.tab === 'api') initDocScrollspy()
     })
   })
@@ -1082,6 +1121,108 @@ async function sendNotify() {
     await API.post('/api/notify', { content: { text } })
     toast('通知发送成功')
     document.getElementById('notify-text').value = ''
+  } catch(e) { toast(e.message, 'error') }
+}
+
+// ===== 会话管理 =====
+let currentSessionConfig = null
+
+async function loadSessionConfig() {
+  try {
+    const config = await API.get('/api/sessions/config')
+    currentSessionConfig = config
+    document.getElementById('sessions-max-rounds').value = config.maxRounds
+    document.getElementById('sessions-expire').value = String(config.expireMs)
+  } catch(e) { /* ignore */ }
+}
+
+async function saveSessionConfig() {
+  const maxRounds = parseInt(document.getElementById('sessions-max-rounds').value) || 10
+  const expireMs = parseInt(document.getElementById('sessions-expire').value)
+
+  try {
+    const config = await API.put('/api/sessions/config', { maxRounds, expireMs })
+    currentSessionConfig = config
+    const labels = { '1800000': '30分钟', '3600000': '1小时', '7200000': '2小时', '86400000': '24小时', '604800000': '7天', '0': '永不过期' }
+    toast('配置已保存：' + config.maxRounds + '轮 / ' + (labels[String(expireMs)] || expireMs + 'ms'))
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function loadSessions() {
+  try {
+    const sessions = await API.get('/api/sessions')
+    document.getElementById('session-count').textContent = sessions.length
+    const tbody = document.getElementById('session-list')
+    if (sessions.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无会话</td></tr>'
+      return
+    }
+    const now = Date.now()
+    tbody.innerHTML = sessions.map(s => {
+      const expireMs = currentSessionConfig ? currentSessionConfig.expireMs : 1800000
+      const expired = expireMs > 0 && (now - s.lastActive) > expireMs
+      const timeStr = new Date(s.lastActive).toLocaleString('zh-CN')
+      const expireStatus = expireMs <= 0
+        ? '<span style="color:#10b981">永不过期</span>'
+        : expired
+          ? '<span style="color:#dc2626">已过期</span>'
+          : '<span style="color:#10b981">活跃</span>'
+      return `<tr>
+        <td style="font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis">${s.userId}</td>
+        <td><code>${s.agentId}</code></td>
+        <td>${s.messageCount}</td>
+        <td style="font-size:12px;color:#888">${timeStr}</td>
+        <td>${expireStatus}</td>
+        <td>
+          <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;margin-right:4px" onclick="viewSession('${encodeURIComponent(s.userId)}','${encodeURIComponent(s.agentId)}')">查看</button>
+          <button class="btn btn-danger" style="padding:4px 10px;font-size:12px" onclick="deleteSession('${encodeURIComponent(s.userId)}','${encodeURIComponent(s.agentId)}')">删除</button>
+        </td>
+      </tr>`
+    }).join('')
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function viewSession(userId, agentId) {
+  try {
+    const session = await API.get('/api/sessions/detail?userId=' + encodeURIComponent(userId) + '&agentId=' + encodeURIComponent(agentId))
+    const card = document.getElementById('session-detail-card')
+    const content = document.getElementById('session-detail-content')
+    document.getElementById('detail-title').textContent = userId + ' / ' + agentId
+
+    const historyHtml = session.history.length === 0
+      ? '<div class="empty">暂无对话记录</div>'
+      : session.history.map(h => `<div style="margin-bottom:8px;padding:8px;border-radius:4px;background:${h.role==='user'?'#f0f4ff':'#f0fdf4'}">
+        <strong style="font-size:12px">${h.role === 'user' ? '👤 用户' : '🤖 助手'}</strong>
+        <span style="font-size:11px;color:#888;margin-left:8px">${new Date(h.timestamp).toLocaleString('zh-CN')}</span>
+        <div style="margin-top:4px;font-size:13px;white-space:pre-wrap">${h.content}</div>
+      </div>`).join('')
+
+    content.innerHTML = `
+      <div style="font-size:13px;color:#888;margin-bottom:8px">
+        最后活跃：${new Date(session.lastActive).toLocaleString('zh-CN')} | 消息数：${session.history.length}
+      </div>
+      ${historyHtml}`
+    card.style.display = ''
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function deleteSession(userId, agentId) {
+  if (!confirm('确定要删除 ' + userId + ' / ' + agentId + ' 的会话吗？')) return
+  try {
+    await API.del('/api/sessions/clear', { userId, agentId })
+    toast('会话已删除')
+    loadSessions()
+    document.getElementById('session-detail-card').style.display = 'none'
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function clearAllSessions() {
+  if (!confirm('确定要清空所有会话吗？此操作不可撤销！')) return
+  try {
+    const data = await API.del('/api/sessions/clear', {})
+    toast('已清空 ' + data.cleared + ' 个会话')
+    loadSessions()
+    document.getElementById('session-detail-card').style.display = 'none'
   } catch(e) { toast(e.message, 'error') }
 }
 
