@@ -150,17 +150,11 @@ export class SessionManager {
     const sessions: SessionSummary[] = []
 
     for (const key of keys) {
-      // key 格式: session:userId:agentId
-      const parts = key.slice(SESSION_KEY_PREFIX.length).split(':')
-      if (parts.length < 2) continue
-      const userId = parts[0]
-      const agentId = parts.slice(1).join(':') // agentId 可能包含冒号
-
       const session = await this.storage.get<Session>(key)
-      if (session) {
+      if (session && session.userId && session.agentId) {
         sessions.push({
-          userId,
-          agentId,
+          userId: session.userId,
+          agentId: session.agentId,
           messageCount: session.history.length,
           lastActive: session.lastActive,
         })
