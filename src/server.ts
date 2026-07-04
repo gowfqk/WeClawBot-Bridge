@@ -290,6 +290,66 @@ export function createServer(
     }
   })
 
+  // ===== 配置备份 =====
+  app.get('/api/config/export', dynamicAuth, async (_req, res) => {
+    try {
+      const agents = agentRegistry.listAll()
+      const sessionConfig = await sessionManager.getConfig()
+      const apiKey = await storage.get<string>(API_KEY_STORAGE_KEY)
+
+      const backup = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        agents,
+        defaultAgentId: config.defaultAgentId,
+        session: sessionConfig,
+        apiKey: apiKey || undefined,
+      }
+
+      res.setHeader('Content-Type', 'application/json')
+      res.setHeader('Content-Disposition', 'attachment; filename="weclawbot-backup.json"')
+      res.json(backup)
+    } catch (err) {
+      const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
+  })
+
+  app.post('/api/config/import', dynamicAuth, async (req, res) => {
+    try {
+      const backup = req.body
+      if (!backup || !Array.isArray(backup.agents)) {
+        res.status(400).json({ error: '无效的备份文件：缺少 agents 数组' })
+        return
+      }
+
+      // 导入 Agent
+      for (const agent of agentRegistry.listAll()) {
+        agentRegistry.unregister(agent.id)
+      }
+      for (const agent of backup.agents) {
+        agentRegistry.register(agent)
+      }
+      commandHandler.updateAgents(agentRegistry.listAll())
+      saveAgents(agentRegistry.listAll(), backup.defaultAgentId || config.defaultAgentId)
+
+      // 导入会话配置
+      if (backup.session) {
+        await sessionManager.updateConfig(backup.session.maxRounds, backup.session.expireMs)
+      }
+
+      // 导入 API Key（可选）
+      if (backup.apiKey) {
+        await storage.set(API_KEY_STORAGE_KEY, backup.apiKey)
+      }
+
+      res.json({ ok: true, agents: backup.agents.length, session: !!backup.session })
+    } catch (err) {
+      const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
+  })
+
   app.get('/api/agents', (_req, res) => {
     res.json(agentRegistry.listAll())
   })

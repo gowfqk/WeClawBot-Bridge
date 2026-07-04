@@ -7,7 +7,7 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;color:#333;display:flex;min-height:100vh}
-nav{width:200px;background:#1a1a2e;color:#e0e0e0;padding:20px 0;flex-shrink:0;transition:width .25s ease;overflow:hidden;position:relative}
+nav{width:200px;background:#1a1a2e;color:#e0e0e0;padding:20px 0;flex-shrink:0;transition:width .25s ease;overflow:hidden auto;position:sticky;top:0;height:100vh}
 nav.collapsed{width:48px}
 nav h2{padding:0 20px 20px;font-size:16px;color:#fff;border-bottom:1px solid #333;white-space:nowrap;overflow:hidden}
 nav a{display:flex;align-items:center;gap:10px;padding:12px 14px;color:#a0a0c0;text-decoration:none;font-size:14px;cursor:pointer;transition:all .2s;white-space:nowrap;overflow:hidden}
@@ -376,6 +376,15 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-fa
       <div class="form-group"><label>新密码</label><input id="new-password" type="password" placeholder="至少4位字符"></div>
       <div class="form-group"><label>确认新密码</label><input id="new-password2" type="password" placeholder="再次输入新密码"></div>
       <button class="btn btn-primary" onclick="changePassword()">修改密码</button>
+    </div>
+    <div class="card">
+      <h3>配置备份</h3>
+      <p style="font-size:13px;color:#888;margin-bottom:12px">导出所有 Agent 配置、会话设置和管理密码为 JSON 文件，可用于迁移或恢复。</p>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="exportConfig()">📥 导出配置</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">📤 导入配置</button>
+        <input type="file" id="import-file" accept=".json" style="display:none" onchange="importConfig(event)">
+      </div>
     </div>
   </div>
 
@@ -931,6 +940,46 @@ async function changePassword() {
   } catch (e) {
     toast(e.message, 'error')
   }
+}
+
+// ===== 配置备份 =====
+async function exportConfig() {
+  try {
+    const r = await fetch('/api/config/export', { headers: Auth.headers() })
+    if (!r.ok) throw new Error(await r.text())
+    const blob = await r.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'weclawbot-backup.json'
+    a.click()
+    URL.revokeObjectURL(url)
+    toast('配置已导出')
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function importConfig(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  if (!confirm('导入配置将覆盖当前所有 Agent 和会话设置，是否继续？')) {
+    e.target.value = ''
+    return
+  }
+  try {
+    const text = await file.text()
+    const backup = JSON.parse(text)
+    const r = await fetch('/api/config/import', {
+      method: 'POST',
+      headers: Auth.headers(),
+      body: JSON.stringify(backup)
+    })
+    if (!r.ok) throw new Error(await r.text())
+    const data = await r.json()
+    toast('配置导入成功：' + data.agents + ' 个 Agent')
+    loadAgents()
+    loadSessionConfig()
+  } catch(err) { toast(err.message, 'error') }
+  e.target.value = ''
 }
 
 // ===== 管理面板逻辑 =====
