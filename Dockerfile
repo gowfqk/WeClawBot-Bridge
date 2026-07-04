@@ -14,6 +14,5 @@ RUN npm ci && npm run build
 RUN rm -rf src/ tsconfig.json && npm ci --omit=dev
 
 EXPOSE 3000
-VOLUME ["/app/.wechatbot-gateway"]
 
 CMD ["node", "dist/index.js"]
