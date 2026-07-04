@@ -43,6 +43,10 @@ export class CommandHandler {
       return { type: 'status' }
     }
 
+    if (trimmed === '#clear') {
+      return { type: 'clear' }
+    }
+
     if (trimmed.startsWith('#')) {
       const command = trimmed.slice(1).toLowerCase()
 
@@ -78,6 +82,7 @@ export class CommandHandler {
     lines.push('  #help 或 #h  — 显示此帮助')
     lines.push('  #status      — 查看 Bot 在线状态')
     lines.push('  #agents 或 #a — 列出所有 Agent')
+    lines.push('  #clear       — 清空当前 Agent 的对话历史')
     lines.push('  #agent名     — 切换到指定 Agent')
     lines.push('')
     lines.push('切换 Agent 后直接发送消息即可与对应 AI 对话。')

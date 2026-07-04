@@ -107,7 +107,7 @@ export interface BotStatus {
 }
 
 export interface CommandResult {
-  type: 'switch' | 'help' | 'agents' | 'status' | 'message' | 'unknown'
+  type: 'switch' | 'help' | 'agents' | 'status' | 'clear' | 'message' | 'unknown'
   targetAgentId?: string
 }
 

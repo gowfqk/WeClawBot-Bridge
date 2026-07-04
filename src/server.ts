@@ -406,10 +406,14 @@ export function createServer(
     }
     try {
       const start = Date.now()
+      const session = await sessionManager.getOrCreate('admin-test', agentId)
       const response = await agentRegistry.invoke(agentId, {
         message: { text, type: 'text' },
-        session: { userId: 'admin-test', agentId, history: [] },
+        session: { userId: 'admin-test', agentId, history: session.history },
       })
+      // 持久化测试消息
+      sessionManager.append('admin-test', agentId, { role: 'user', content: text, timestamp: Date.now() })
+      sessionManager.append('admin-test', agentId, { role: 'assistant', content: response.reply.text, timestamp: Date.now() })
       res.json({
         text: response.reply.text,
         elapsed: Date.now() - start,

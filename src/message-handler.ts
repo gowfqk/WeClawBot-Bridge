@@ -47,6 +47,17 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
         return
       }
 
+      if (result.type === 'clear') {
+        const agentId = await userState.getCurrentAgent(userId)
+        if (agentId) {
+          await sessionManager.clear(userId, agentId)
+          await reply('当前 Agent 的会话历史已清空。')
+        } else {
+          await reply('请先选择一个 Agent。')
+        }
+        return
+      }
+
       if (result.type === 'switch' && result.targetAgentId) {
         const agent = agentRegistry.get(result.targetAgentId)
         if (!agent) {
@@ -83,6 +94,7 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
         }
       }
 
+      // 构建 agent payload：history 只传之前的，当前消息由 agent 自己追加
       const agentPayload = {
         message: {
           text,
@@ -98,12 +110,16 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
 
       const response = await agentRegistry.invoke(currentAgentId, agentPayload)
 
-      const userEntry: ChatEntry = {
-        role: 'user',
-        content: text,
-        timestamp: Date.now(),
+      // 去重：避免重复追加相同内容
+      const lastEntry = session.history[session.history.length - 1]
+      if (!lastEntry || lastEntry.content !== text || lastEntry.role !== 'user') {
+        const userEntry: ChatEntry = {
+          role: 'user',
+          content: text,
+          timestamp: Date.now(),
+        }
+        await sessionManager.append(userId, currentAgentId, userEntry)
       }
-      await sessionManager.append(userId, currentAgentId, userEntry)
 
       const assistantEntry: ChatEntry = {
         role: 'assistant',
