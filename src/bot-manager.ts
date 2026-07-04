@@ -17,6 +17,8 @@ export class BotManager {
   private loginPromise: Promise<unknown> | null = null
   private qrCallback: ((url: string) => void) | undefined
   private qrRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null
+  private readonly KEEPALIVE_INTERVAL = 12 * 60 * 60 * 1000 // 12 小时
 
   constructor(storage: Storage, botAgent?: string) {
     this.bot = new WeChatBot({
@@ -32,11 +34,21 @@ export class BotManager {
         currentUser: (creds as unknown as Record<string, unknown>).userId as string,
         polling: false,
       }
+      this.startKeepalive()
     })
 
     this.bot.on('session:expired', () => {
+      console.warn('Session expired, attempting auto-reconnect...')
       this.status = { loggedIn: false, polling: false }
       this.isStarted = false
+      this.stopKeepalive()
+      // 自动重连
+      this.loginAndStart(this.qrCallback).then(() => {
+        console.log('Auto-reconnect succeeded')
+        this.startKeepalive()
+      }).catch((err) => {
+        console.error('Auto-reconnect failed:', (err as Error).message)
+      })
     })
 
     this.bot.on('session:restored', (creds) => {
@@ -46,6 +58,7 @@ export class BotManager {
         currentUser: (creds as unknown as Record<string, unknown>).userId as string,
         polling: false,
       }
+      this.startKeepalive()
     })
   }
 
@@ -119,7 +132,33 @@ export class BotManager {
     })
   }
 
+  // ===== 心跳保活 =====
+
+  /** 启动定期心跳，防止微信 token 48 小时不活动失效 */
+  startKeepalive(): void {
+    if (this.keepaliveTimer) return
+    this.keepaliveTimer = setInterval(() => {
+      if (!this.status.loggedIn || !this.status.currentUser) return
+      const user = this.status.currentUser
+      this.bot.send(user, { text: '🏓' }).then(() => {
+        console.log(`Keepalive ping sent to ${user}`)
+      }).catch((err) => {
+        console.error('Keepalive ping failed:', (err as Error).message)
+      })
+    }, this.KEEPALIVE_INTERVAL)
+    console.log(`Keepalive started (interval: ${this.KEEPALIVE_INTERVAL / 3600000}h)`)
+  }
+
+  /** 停止心跳 */
+  stopKeepalive(): void {
+    if (this.keepaliveTimer) {
+      clearInterval(this.keepaliveTimer)
+      this.keepaliveTimer = null
+    }
+  }
+
   async stop(): Promise<void> {
+    this.stopKeepalive()
     this.isStarted = false
     this.status.polling = false
     this.bot.stop()

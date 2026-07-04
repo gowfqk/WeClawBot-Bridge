@@ -79,6 +79,7 @@ async function main(): Promise<void> {
     console.log('Scan the QR code with WeChat to login')
   }).then(() => {
     botStatus.set(1)
+    botManager.startKeepalive()
   }).catch((err) => {
     console.error('Failed to login after retries:', err.message)
     console.log('Use POST /api/bot/login to try again manually')
