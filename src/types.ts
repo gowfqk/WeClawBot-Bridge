@@ -11,7 +11,7 @@ export interface AgentConfig {
   headers?: Record<string, string>
   apiKey?: string
   model?: string
-  format?: 'native' | 'openai'
+  format?: 'native' | 'openai' | 'qwenpaw'
   streaming?: boolean
   responsePath?: string
   cliCommand?: string

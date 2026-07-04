@@ -14,7 +14,7 @@ const AgentConfigSchema = z.object({
   headers: z.record(z.string(), z.string()).optional(),
   apiKey: z.string().optional(),
   model: z.string().optional(),
-  format: z.enum(['native', 'openai']).optional(),
+  format: z.enum(['native', 'openai', 'qwenpaw']).optional(),
   streaming: z.boolean().optional(),
   responsePath: z.string().optional(),
   cliCommand: z.string().optional(),

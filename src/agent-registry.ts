@@ -88,6 +88,10 @@ export class AgentRegistry {
   }
 
   private buildRequestBody(agent: AgentConfig, payload: AgentPayload): Record<string, unknown> {
+    if (agent.format === 'qwenpaw') {
+      return this.buildQwenPawRequest(agent, payload)
+    }
+
     if (agent.format === 'openai') {
       const messages = this.buildOpenAIMessages(agent, payload)
       const body: Record<string, unknown> = {
@@ -113,11 +117,116 @@ export class AgentRegistry {
     }
   }
 
+  /** Build QwenPaw AgentRequest */
+  private buildQwenPawRequest(agent: AgentConfig, payload: AgentPayload): Record<string, unknown> {
+    const input: Array<Record<string, unknown>> = []
+
+    // History messages
+    for (const entry of payload.session.history) {
+      input.push({
+        type: 'message',
+        role: entry.role,
+        content: [{ type: 'text', text: entry.content }],
+        status: 'completed',
+      })
+    }
+
+    // Current message
+    const { text, media, type } = payload.message
+    const isImage = type === 'image' || type?.startsWith('image')
+    if (media && isImage) {
+      const mime = type === 'image' ? 'jpeg' : type.replace('image/', '')
+      const b64 = media.toString('base64')
+      const contentBlocks: Array<Record<string, unknown>> = [
+        { type: 'image', image: `data:image/${mime};base64,${b64}` },
+      ]
+      if (text) contentBlocks.push({ type: 'text', text })
+      input.push({ type: 'message', role: 'user', content: contentBlocks, status: 'completed' })
+    } else {
+      input.push({
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'text', text: text || '' }],
+        status: 'completed',
+      })
+    }
+
+    const body: Record<string, unknown> = {
+      input,
+      session_id: payload.session.userId,
+      user_id: payload.session.userId,
+      stream: agent.streaming === true,
+    }
+
+    if (agent.model) body.model = agent.model
+    return body
+  }
+
+  /** Extract text from QwenPaw response */
+  private extractQwenPawText(data: Record<string, unknown>): string | null {
+    const output = data.output as Array<Record<string, unknown>> | undefined
+    if (!output || output.length === 0) return null
+
+    const lastMsg = output[output.length - 1]
+    const content = lastMsg?.content as Array<Record<string, unknown>> | undefined
+    if (!content || content.length === 0) return null
+
+    const parts: string[] = []
+    for (const block of content) {
+      if (block.type === 'text' && typeof block.text === 'string') {
+        parts.push(block.text)
+      }
+    }
+    return parts.length > 0 ? parts.join('') : null
+  }
+
+  /** Parse QwenPaw SSE stream */
+  private async readQwenPawSSE(response: Response): Promise<string> {
+    const reader = response.body?.getReader()
+    if (!reader) return ''
+
+    const decoder = new TextDecoder()
+    const parts: string[] = []
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        for (const line of chunk.split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data:')) continue
+          const dataPayload = trimmed.slice(5).trim()
+          try {
+            const parsed = JSON.parse(dataPayload) as Record<string, unknown>
+            const content = parsed.content as Array<Record<string, unknown>> | undefined
+            if (content) {
+              for (const block of content) {
+                if (block.type === 'text' && typeof block.text === 'string') {
+                  parts.push(block.text)
+                }
+              }
+            }
+          } catch {
+            // skip non-JSON
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+
+    return parts.join('')
+  }
+
   private resolveEndpoint(agent: AgentConfig): string {
     let url = agent.endpoint || ''
-    if (agent.format === 'openai') {
-      // 用户填写 base URL（如 https://api.openai.com/v1），
-      // 自动补全为 /chat/completions
+    if (agent.format === 'qwenpaw') {
+      if (!url.endsWith('/api/console/chat')) {
+        url = url.replace(/\/+$/, '') + '/api/console/chat'
+      }
+    } else if (agent.format === 'openai') {
       if (!url.endsWith('/chat/completions')) {
         url = url.replace(/\/+$/, '') + '/chat/completions'
       }
@@ -177,7 +286,19 @@ export class AgentRegistry {
         return text ? { reply: { text } } : { reply: { text: this.defaultFallbackText } }
       }
 
+      if (agent.streaming && agent.format === 'qwenpaw') {
+        const text = await this.readQwenPawSSE(response)
+        return text ? { reply: { text } } : { reply: { text: this.defaultFallbackText } }
+      }
+
       const data = (await response.json()) as Record<string, unknown>
+
+      // QwenPaw non-streaming response
+      if (agent.format === 'qwenpaw') {
+        const text = this.extractQwenPawText(data)
+        return text ? { reply: { text } } : { reply: { text: this.defaultFallbackText } }
+      }
+
       const text = agent.responsePath
         ? this.extractByPath(data, agent.responsePath)
         : this.extractResponseText(data)
@@ -223,7 +344,7 @@ export class AgentRegistry {
               }
             }
           } catch {
-            // 跳过非 JSON 行
+            // skip non-JSON
           }
         }
       }
