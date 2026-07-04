@@ -146,10 +146,12 @@ export class SessionManager {
 
   /** 列出所有会话摘要 */
   async listSessions(): Promise<SessionSummary[]> {
-    const keys = await this.storage.listKeys(SESSION_KEY_PREFIX)
+    const keys = await this.storage.listKeys('session')
     const sessions: SessionSummary[] = []
 
     for (const key of keys) {
+      // 跳过会话配置键
+      if (key === 'session:config' || key === 'session_config' || key === SESSION_CONFIG_KEY) continue
       const session = await this.storage.get<Session>(key)
       if (session && session.userId && session.agentId) {
         sessions.push({
@@ -191,12 +193,16 @@ export class SessionManager {
 
   /** 清空所有会话 */
   async clearAllSessions(): Promise<number> {
-    const keys = await this.storage.listKeys(SESSION_KEY_PREFIX)
+    const keys = await this.storage.listKeys('session')
+    let count = 0
     for (const key of keys) {
+      // 跳过会话配置键
+      if (key === 'session:config' || key === 'session_config' || key === SESSION_CONFIG_KEY) continue
       await this.storage.delete(key)
       this.cache.delete(key)
+      count++
     }
-    return keys.length
+    return count
   }
 
   /** 获取会话配置 */
