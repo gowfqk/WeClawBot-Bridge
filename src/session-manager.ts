@@ -28,7 +28,7 @@ export class SessionManager {
   private cache: Map<string, CacheEntry> = new Map()
   private readonly CACHE_TTL = 5 * 60 * 1000 // 5分钟缓存
 
-  constructor(storage: Storage, maxRounds: number = 10, expireMs: number = 30 * 60 * 1000) {
+  constructor(storage: Storage, maxRounds: number = 0, expireMs: number = 0) {
     this.storage = storage
     this.maxRounds = maxRounds
     this.expireMs = expireMs
@@ -95,9 +95,12 @@ export class SessionManager {
     session.history.push(entry)
     session.lastActive = Date.now()
 
-    const maxEntries = this.maxRounds * 2
-    if (session.history.length > maxEntries) {
-      session.history = session.history.slice(session.history.length - maxEntries)
+    // maxRounds <= 0 表示不限制轮次
+    if (this.maxRounds > 0) {
+      const maxEntries = this.maxRounds * 2
+      if (session.history.length > maxEntries) {
+        session.history = session.history.slice(session.history.length - maxEntries)
+      }
     }
 
     // 更新存储

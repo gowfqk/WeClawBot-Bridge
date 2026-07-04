@@ -105,7 +105,7 @@ node dist/index.js
 | `ENCRYPTION_KEY` | 凭证加密密钥（32字节十六进制） | 无 |
 | `STORAGE_DIR` | 数据存储目录 | `.wechatbot-gateway` |
 | `LOG_LEVEL` | 日志级别 | `info` |
-| `SESSION_MAX_ROUNDS` | 会话最大轮次 | `10` |
+| `SESSION_MAX_ROUNDS` | 会话最大轮次，`0` = 不限制 | `0` |
 | `SESSION_EXPIRE_MS` | 会话过期时间（毫秒），`0` = 永不过期 | `0` |
 
 ## API 端点
@@ -171,7 +171,7 @@ curl -X POST https://your-domain/api/webhook \
 - **详情**：查看完整对话历史，区分用户/助手消息及时间戳
 - **操作**：逐条删除或一键清空全部会话
 
-默认配置：最大 10 轮对话，永不过期。
+默认配置：对话轮次不限制，会话永不过期。
 
 ## 技术栈
 

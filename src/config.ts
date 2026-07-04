@@ -90,8 +90,8 @@ export function loadConfig(configPath?: string): AppConfig {
     logLevel: env.logLevel || 'info',
     agents,
     defaultAgentId,
-    sessionMaxRounds: env.sessionMaxRounds || 10,
-    sessionExpireMs: env.sessionExpireMs || 0,  // 0 = 永不过期
+    sessionMaxRounds: env.sessionMaxRounds ?? 0,  // 0 = 不限制轮次
+    sessionExpireMs: env.sessionExpireMs ?? 0,  // 0 = 永不过期
   }
 
   return cachedConfig

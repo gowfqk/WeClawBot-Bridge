@@ -336,7 +336,7 @@ code{background:#f3f4f6;padding:2px 6px;border-radius:3px;font-size:12px;font-fa
     <div class="card">
       <h3>会话配置</h3>
       <div class="form-row">
-        <div class="form-group"><label>最大对话轮次</label><input id="sessions-max-rounds" type="number" min="1" value="10"></div>
+        <div class="form-group"><label>最大对话轮次</label><input id="sessions-max-rounds" type="number" min="0" value="0" placeholder="0 表示不限制"></div>
         <div class="form-group"><label>过期时间</label><select id="sessions-expire">
           <option value="0">永不过期</option>
           <option value="1800000">30 分钟</option>
@@ -659,7 +659,7 @@ curl -X DELETE /api/sessions/clear \
             <span class="doc-method get">GET</span><code>/api/sessions/config</code>
           </div>
           <p class="doc-p">获取当前会话配置。</p>
-          <div class="doc-code-block"><pre>{"maxRounds": 10, "expireMs": 0}</pre></div>
+          <div class="doc-code-block"><pre>{"maxRounds": 0, "expireMs": 0}</pre></div>
 
           <div class="doc-endpoint">
             <span class="doc-method put">PUT</span><code>/api/sessions/config</code>
@@ -731,7 +731,7 @@ curl -X POST /api/notify \
               <tr><td><code>ENCRYPTION_KEY</code></td><td>—</td><td>凭证加密密钥，32 字节十六进制字符串</td></tr>
               <tr><td><code>STORAGE_DIR</code></td><td>.wechatbot-gateway</td><td>数据持久化目录</td></tr>
               <tr><td><code>LOG_LEVEL</code></td><td>info</td><td>日志级别：trace / debug / info / warn / error</td></tr>
-              <tr><td><code>SESSION_MAX_ROUNDS</code></td><td>10</td><td>每个 Agent 保留的最大对话轮次</td></tr>
+              <tr><td><code>SESSION_MAX_ROUNDS</code></td><td>0</td><td>每个 Agent 保留的最大对话轮次，0 = 不限制</td></tr>
               <tr><td><code>SESSION_EXPIRE_MS</code></td><td>0</td><td>会话过期时间（毫秒），0 = 永不过期</td></tr>
               <tr><td><code>ALLOWED_ORIGINS</code></td><td>—</td><td>CORS 允许的来源，逗号分隔</td></tr>
             </tbody>
@@ -1204,14 +1204,16 @@ async function loadSessionConfig() {
 }
 
 async function saveSessionConfig() {
-  const maxRounds = parseInt(document.getElementById('sessions-max-rounds').value) || 10
+  const parsedMaxRounds = parseInt(document.getElementById('sessions-max-rounds').value)
+  const maxRounds = Number.isFinite(parsedMaxRounds) ? parsedMaxRounds : 0
   const expireMs = parseInt(document.getElementById('sessions-expire').value)
 
   try {
     const config = await API.put('/api/sessions/config', { maxRounds, expireMs })
     currentSessionConfig = config
     const labels = { '1800000': '30分钟', '3600000': '1小时', '7200000': '2小时', '86400000': '24小时', '604800000': '7天', '0': '永不过期' }
-    toast('配置已保存：' + config.maxRounds + '轮 / ' + (labels[String(expireMs)] || expireMs + 'ms'))
+    const roundsLabel = config.maxRounds <= 0 ? '不限制轮次' : config.maxRounds + '轮'
+    toast('配置已保存：' + roundsLabel + ' / ' + (labels[String(expireMs)] || expireMs + 'ms'))
   } catch(e) { toast(e.message, 'error') }
 }
 
