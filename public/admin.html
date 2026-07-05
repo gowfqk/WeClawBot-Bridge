@@ -1091,7 +1091,8 @@ async function submitAgent() {
       toast('Agent 已更新')
       cancelEdit()
     } else {
-      agent.id = document.getElementById('add-id').value
+      agent.id = document.getElementById('add-id').value.trim()
+      if (!agent.id) { toast('Agent ID 不能为空', 'error'); return }
       await API.post('/api/agents', agent)
       toast('Agent 添加成功')
       clearAgentForm()
@@ -1122,7 +1123,7 @@ async function loadAgents() {
       <td style="color:#888">${a.description}</td>
       <td style="font-size:12px;color:#6b7280">${a.type === 'cli' ? (a.cliCommand || '') + ' ' + (a.cliArgs || []).join(' ') : (a.endpoint || '')}</td>
       <td style="font-size:12px;color:#6b7280">${a.model || '-'}</td>
-      <td><button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;margin-right:4px" onclick="editAgent('${a.id}')">编辑</button><button class="btn btn-danger" style="padding:4px 10px;font-size:12px" onclick="removeAgent('${a.id}')">删除</button></td>
+      <td><button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;margin-right:4px" onclick="editAgent('${a.id}')">编辑</button>${a.id ? `<button class="btn btn-danger" style="padding:4px 10px;font-size:12px" onclick="removeAgent('${a.id}')">删除</button>` : '<span style="color:#f87171;font-size:12px">ID缺失</span>'}</td>
     </tr>`).join('')
     const sel = document.getElementById('test-agent-select')
     sel.innerHTML = '<option value="">-- 请选择 --</option>' + agents.map(a => `<option value="${a.id}">#${a.command} - ${a.name}</option>`).join('')
@@ -1130,6 +1131,7 @@ async function loadAgents() {
 }
 
 async function removeAgent(id) {
+  if (!id) { toast('Agent ID 为空，无法删除', 'error'); return }
   if (!confirm('确定要删除 Agent "' + id + '" 吗？')) return
   try {
     await API.del('/api/agents/' + id)
