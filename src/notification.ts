@@ -1,4 +1,5 @@
 import cron from 'node-cron'
+import type { ScheduledTask } from 'node-cron'
 import type { Storage, NotificationRule, NotificationLog, SendContent } from './types'
 import type { BotManager } from './bot-manager'
 import crypto from 'node:crypto'
@@ -13,7 +14,7 @@ export class NotificationService {
   private botManager: BotManager
   private storage: Storage
   private rules: Map<string, NotificationRule> = new Map()
-  private cronJobs: Map<string, cron.ScheduledTask> = new Map()
+  private cronJobs: Map<string, ScheduledTask> = new Map()
   private eventHandlers: Map<string, () => Promise<void>> = new Map()
 
   constructor(botManager: BotManager, storage: Storage) {
