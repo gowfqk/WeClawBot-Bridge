@@ -1049,7 +1049,7 @@ async function editAgent(id) {
     const agent = agents.find(a => a.id === id)
     if (!agent) { toast('Agent 未找到', 'error'); return }
     editingAgentId = id
-    document.getElementById('add-id').disabled = true
+    document.getElementById('add-id').disabled = !!id
     document.getElementById('add-agent-btn').textContent = '更新 Agent'
     document.getElementById('cancel-edit-btn').style.display = ''
     fillAgentForm(agent)
@@ -1089,6 +1089,14 @@ async function submitAgent() {
     if (editingAgentId) {
       await API.put('/api/agents/' + editingAgentId, agent)
       toast('Agent 已更新')
+      cancelEdit()
+    } else if (editingAgentId === '') {
+      // Editing an agent that had empty ID — create new one + clean up old
+      agent.id = document.getElementById('add-id').value.trim()
+      if (!agent.id) { toast('Agent ID 不能为空', 'error'); return }
+      await API.post('/api/agents', agent)
+      await API.del('/api/agents/')  // delete old empty-ID agent
+      toast('Agent 已更新（旧空 ID 记录已清理）')
       cancelEdit()
     } else {
       agent.id = document.getElementById('add-id').value.trim()

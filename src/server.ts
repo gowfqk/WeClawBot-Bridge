@@ -390,6 +390,21 @@ export function createServer(
     }
   })
 
+  // Must come before /api/agents/:id to catch empty-ID case
+  app.delete('/api/agents/', dynamicAuth, (req, res) => {
+    try {
+      const agent = agentRegistry.get('')
+      if (!agent) { res.status(404).json({ error: 'No agent with empty ID' }); return }
+      agentRegistry.unregister('')
+      commandHandler.updateAgents(agentRegistry.listAll())
+      saveAgents(agentRegistry.listAll(), config.defaultAgentId)
+      res.json({ ok: true })
+    } catch (err) {
+      const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
+  })
+
   app.delete('/api/agents/:id', dynamicAuth, (req, res) => {
     try {
       agentRegistry.unregister(req.params.id as string)
