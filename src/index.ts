@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { loadConfig } from './config'
+import { loadConfig, loadAgentsFromStorage } from './config'
 import { FileStorage, EncryptedStorage, MemoryStorage } from './storage'
 import { UserStateManager } from './user-state'
 import { CommandHandler } from './command-handler'
@@ -42,7 +42,27 @@ async function main(): Promise<void> {
   for (const agent of config.agents) {
     agentRegistry.register(agent)
   }
+
+  // 优先从 Storage 加载 Agent（跨部署持久化，覆盖文件中的默认值）
+  await loadAgentsFromStorage(rawStorage)
+  const storageAgents = config.agents
+  if (storageAgents.length > 0) {
+    // 清除文件加载的，用 Storage 中的覆盖
+    for (const agent of agentRegistry.listAll()) {
+      agentRegistry.unregister(agent.id)
+    }
+    for (const agent of storageAgents) {
+      agentRegistry.register(agent)
+    }
+  }
+
   commandHandler.updateAgents(agentRegistry.listAll())
+
+  // 首次启动时将文件中的 Agent 同步到 Storage（确保跨部署持久化）
+  if (agentRegistry.listAll().length > 0) {
+    const { saveAgents } = await import('./config')
+    await saveAgents(agentRegistry.listAll(), config.defaultAgentId, rawStorage)
+  }
 
   const messageHandler = createMessageHandler({
     commandHandler,

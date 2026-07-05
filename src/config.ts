@@ -76,10 +76,14 @@ export function loadConfig(configPath?: string): AppConfig {
   let defaultAgentId: string | undefined
 
   if (fs.existsSync(agentsPath)) {
-    const raw = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'))
-    const parsed = AgentsFileSchema.parse(raw)
-    agents = parsed.agents
-    defaultAgentId = parsed.defaultAgentId
+    try {
+      const raw = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'))
+      const parsed = AgentsFileSchema.parse(raw)
+      agents = parsed.agents
+      defaultAgentId = parsed.defaultAgentId
+    } catch {
+      // agents.json 损坏时忽略，使用空列表
+    }
   }
 
   cachedConfig = {
@@ -97,14 +101,40 @@ export function loadConfig(configPath?: string): AppConfig {
   return cachedConfig
 }
 
-export async function saveAgents(agents: AgentConfig[], defaultAgentId?: string): Promise<void> {
+/** 从 Storage 加载 Agent 数据（优先于文件），启动时调用 */
+export async function loadAgentsFromStorage(storage: { get: <T>(key: string) => Promise<T | undefined> }): Promise<void> {
+  const data = await storage.get<{ agents: AgentConfig[]; defaultAgentId?: string }>('config:agents')
+  if (data && Array.isArray(data.agents) && data.agents.length > 0) {
+    const parsed = AgentsFileSchema.safeParse(data)
+    if (parsed.success) {
+      if (cachedConfig) {
+        cachedConfig.agents = parsed.data.agents
+        cachedConfig.defaultAgentId = parsed.data.defaultAgentId
+      }
+    }
+  }
+}
+
+export async function saveAgents(agents: AgentConfig[], defaultAgentId?: string, storage?: { set: (key: string, value: unknown) => Promise<void> }): Promise<void> {
+  const data = { agents, defaultAgentId }
+
+  // 优先写入 Storage（跨部署持久化）
+  if (storage) {
+    await storage.set('config:agents', data)
+  }
+
+  // 同时写入文件（作为本地 fallback）
   if (!cachedAgentsPath) {
     cachedAgentsPath = resolveAgentsPath()
   }
-  const dir = path.dirname(cachedAgentsPath)
-  await fs.promises.mkdir(dir, { recursive: true })
-  const data = { agents, defaultAgentId }
-  await fs.promises.writeFile(cachedAgentsPath, JSON.stringify(data, null, 2), 'utf-8')
+  try {
+    const dir = path.dirname(cachedAgentsPath)
+    await fs.promises.mkdir(dir, { recursive: true })
+    await fs.promises.writeFile(cachedAgentsPath, JSON.stringify(data, null, 2), 'utf-8')
+  } catch {
+    // 文件写入失败不影响运行（Docker 只读文件系统等场景）
+  }
+
   if (cachedConfig) {
     cachedConfig.agents = agents
     if (defaultAgentId !== undefined) {

@@ -394,7 +394,7 @@ export function createServer(
         agentRegistry.register(agent)
       }
       commandHandler.updateAgents(agentRegistry.listAll())
-      await saveAgents(agentRegistry.listAll(), backup.defaultAgentId || config.defaultAgentId)
+      await saveAgents(agentRegistry.listAll(), backup.defaultAgentId || config.defaultAgentId, storage)
 
       // 导入会话配置
       if (backup.session) {
@@ -465,7 +465,7 @@ export function createServer(
       if (!v.ok) { res.status(400).json({ error: v.error }); return }
       agentRegistry.register(v.data)
       commandHandler.updateAgents(agentRegistry.listAll())
-      await saveAgents(agentRegistry.listAll(), config.defaultAgentId)
+      await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage)
       res.status(201).json(v.data)
     } catch (err) {
       const error = err as Error
@@ -489,7 +489,7 @@ export function createServer(
       agentRegistry.unregister(existing.id)
       agentRegistry.register(updated)
       commandHandler.updateAgents(agentRegistry.listAll())
-      await saveAgents(agentRegistry.listAll(), config.defaultAgentId)
+      await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage)
       res.json(updated)
     } catch (err) {
       const error = err as Error
@@ -504,7 +504,7 @@ export function createServer(
       if (!agent) { res.status(404).json({ error: 'No agent with empty ID' }); return }
       agentRegistry.unregister('')
       commandHandler.updateAgents(agentRegistry.listAll())
-      await saveAgents(agentRegistry.listAll(), config.defaultAgentId)
+      await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage)
       res.json({ ok: true })
     } catch (err) {
       const error = err as Error
@@ -516,7 +516,7 @@ export function createServer(
     try {
       agentRegistry.unregister(req.params.id as string)
       commandHandler.updateAgents(agentRegistry.listAll())
-      await saveAgents(agentRegistry.listAll(), config.defaultAgentId)
+      await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage)
       res.json({ ok: true })
     } catch (err) {
       const error = err as Error
