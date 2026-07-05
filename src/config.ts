@@ -97,16 +97,14 @@ export function loadConfig(configPath?: string): AppConfig {
   return cachedConfig
 }
 
-export function saveAgents(agents: AgentConfig[], defaultAgentId?: string): void {
+export async function saveAgents(agents: AgentConfig[], defaultAgentId?: string): Promise<void> {
   if (!cachedAgentsPath) {
     cachedAgentsPath = resolveAgentsPath()
   }
   const dir = path.dirname(cachedAgentsPath)
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
+  await fs.promises.mkdir(dir, { recursive: true })
   const data = { agents, defaultAgentId }
-  fs.writeFileSync(cachedAgentsPath, JSON.stringify(data, null, 2), 'utf-8')
+  await fs.promises.writeFile(cachedAgentsPath, JSON.stringify(data, null, 2), 'utf-8')
   if (cachedConfig) {
     cachedConfig.agents = agents
     if (defaultAgentId !== undefined) {

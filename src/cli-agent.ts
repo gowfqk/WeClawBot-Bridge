@@ -32,7 +32,7 @@ export class CliAgentAdapter {
         cwd: config.cliWorkDir || process.cwd(),
         stdio: ['pipe', 'pipe', 'pipe'],
         timeout: config.timeout || 30000,
-        env: { ...process.env, ...(config.headers || {}) },
+        env: { ...process.env, ...(config.headers || {}), ...(config.cliEnv || {}) },
       })
 
       let stdout = ''
@@ -84,8 +84,10 @@ export class CliAgentAdapter {
 
       try {
         // 写入用户消息，然后写入哨兵命令，确保能精准检测到输出结束
+        // 对 sentinel 做 shell 转义，防止注入
+        const escapedSentinel = session!.sentinel.replace(/[^a-zA-Z0-9_]/g, '_')
         session!.process.stdin?.write(payload.message.text + '\n')
-        session!.process.stdin?.write(`echo ${session!.sentinel}\n`)
+        session!.process.stdin?.write(`echo ${escapedSentinel}\n`)
       } catch {
         clearTimeout(timer)
         session!.pendingResolve = null

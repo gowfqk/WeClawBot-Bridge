@@ -2,6 +2,9 @@ import cron from 'node-cron'
 import type { Storage, NotificationRule, NotificationLog, SendContent } from './types'
 import type { BotManager } from './bot-manager'
 import crypto from 'node:crypto'
+import { createLogger } from './logger'
+
+const log = createLogger('notification')
 
 const MAX_RETRIES = 3
 const RETRY_DELAYS = [1000, 2000, 4000]
@@ -89,6 +92,14 @@ export class NotificationService {
   private startCronJob(rule: NotificationRule): void {
     if (!rule.schedule) return
 
+    // 验证 cron 表达式合法性
+    try {
+      cron.validate(rule.schedule)
+    } catch (err) {
+      log.error({ ruleId: rule.id, schedule: rule.schedule, err: (err as Error).message }, 'Invalid cron schedule')
+      return
+    }
+
     const existing = this.cronJobs.get(rule.id)
     if (existing) {
       existing.stop()
@@ -116,10 +127,32 @@ export class NotificationService {
     this.cronJobs.clear()
   }
 
+  /** 列出所有通知规则（用于备份导出） */
+  listRules(): NotificationRule[] {
+    return Array.from(this.rules.values())
+  }
+
+  /** 批量替换通知规则（用于备份导入） */
+  replaceAllRules(rules: NotificationRule[]): void {
+    // 先清除现有规则
+    for (const rule of this.rules.values()) {
+      this.removeRule(rule.id)
+    }
+    // 添加新规则
+    for (const rule of rules) {
+      this.addRule(rule)
+    }
+  }
+
   async getNotificationLogs(): Promise<NotificationLog[]> {
+    const keys = await this.storage.listKeys('notify:log:')
     const logs: NotificationLog[] = []
-    // FileStorage doesn't support key scanning, so this is limited.
-    // For production, use a proper DB-backed storage.
+    for (const key of keys) {
+      const log = await this.storage.get<NotificationLog>(key)
+      if (log) logs.push(log)
+    }
+    // 按时间倒序排列，最新的在前
+    logs.sort((a, b) => b.timestamp - a.timestamp)
     return logs
   }
 }

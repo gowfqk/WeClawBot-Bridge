@@ -9,6 +9,8 @@ export interface AgentConfig {
   endpoint?: string
   timeout: number
   headers?: Record<string, string>
+  /** CLI 进程环境变量（优先于 headers） */
+  cliEnv?: Record<string, string>
   apiKey?: string
   model?: string
   format?: 'native' | 'openai' | 'qwenpaw'

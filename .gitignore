@@ -115,6 +115,12 @@
 .wechatbot-gateway/
 config/agents.json
 
+# Frontend build output (rebuilt by `cd frontend && npm run build`)
+public/assets/
+public/index.html
+public/favicon.svg
+public/icons.svg
+
 # Temporary files
 *.tmp
 *.temp

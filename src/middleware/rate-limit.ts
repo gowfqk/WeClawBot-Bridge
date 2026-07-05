@@ -6,8 +6,7 @@ interface RateLimitStore {
 
 export function rateLimitMiddleware(maxRequests: number = 60, windowMs: number = 60_000) {
   const store: RateLimitStore = {}
-
-  setInterval(() => {
+  let cleanupTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
     const now = Date.now()
     for (const ip of Object.keys(store)) {
       if (store[ip].resetAt < now) {
@@ -16,7 +15,7 @@ export function rateLimitMiddleware(maxRequests: number = 60, windowMs: number =
     }
   }, windowMs)
 
-  return (req: Request, res: Response, next: NextFunction): void => {
+  const middleware = (req: Request, res: Response, next: NextFunction): void => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown'
     const now = Date.now()
 
@@ -35,4 +34,14 @@ export function rateLimitMiddleware(maxRequests: number = 60, windowMs: number =
 
     next()
   }
+
+  /** 停止清理定时器，防止资源泄漏 */
+  middleware.destroy = (): void => {
+    if (cleanupTimer) {
+      clearInterval(cleanupTimer)
+      cleanupTimer = null
+    }
+  }
+
+  return middleware
 }

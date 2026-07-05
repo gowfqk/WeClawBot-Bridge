@@ -8,15 +8,20 @@ import type { SessionManager } from './session-manager'
 import type { AppConfig } from './config'
 import { saveAgents } from './config'
 import type { Storage } from './types'
-import { API_KEY_STORAGE_KEY, DEFAULT_RECIPIENT_KEY } from './types'
+import { API_KEY_STORAGE_KEY } from './types'
 import type { Logger } from 'pino'
-import { authMiddleware } from './middleware/auth'
 import { rateLimitMiddleware } from './middleware/rate-limit'
 import { loggingMiddleware } from './middleware/logging'
+import { SessionAuth } from './middleware/session-auth'
+import { csrfOriginMiddleware } from './middleware/csrf'
 import { getMetrics, botStatus } from './metrics'
+import {
+  LoginSchema, SetupSchema, ChangePasswordSchema,
+  AgentConfigSchema, NotifySchema, NotifyRuleSchema,
+  SessionConfigSchema, ConfigImportSchema, validate,
+} from './schemas'
 import cors from 'cors'
 import helmet from 'helmet'
-import csrf from 'csurf'
 
 export function createServer(
   config: AppConfig,
@@ -30,15 +35,13 @@ export function createServer(
 ) {
   const app = express()
 
-  // 自定义 CSP 配置，允许管理界面必要的内联脚本
+  // 自定义 CSP 配置，允许管理界面必要的资源
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        scriptSrcAttr: ["'unsafe-inline'"],
+        scriptSrc: ["'self'", "https://static.cloudflareinsights.com"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        styleSrcAttr: ["'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https://api.qrserver.com"],
         connectSrc: ["'self'", "http://localhost:*", "https://*.replit.dev", "https://*.replit.app"],
         fontSrc: ["'self'"],
@@ -55,39 +58,38 @@ export function createServer(
     credentials: true
   }))
   
-  app.use(express.json())
+  app.use(express.json({ limit: '1mb' }))
   app.use(loggingMiddleware(logger))
   app.use(rateLimitMiddleware())
-  
-  // CSRF 保护 - 排除 API 认证路由
-  const csrfProtection = csrf({ cookie: false })
-  const apiRoutes = ['/api/bot/login', '/api/bot/status', '/api/health', '/api/metrics', '/api/webhook']
-  
+
+  // CSRF 保护：验证浏览器请求的 Origin/Referer 头
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim().replace(/\/$/, ''))
+  app.use('/api', csrfOriginMiddleware(allowedOrigins))
 
   app.use(express.static(path.resolve(__dirname, '../public')))
 
   app.get('/admin', (_req, res) => {
-    res.redirect('/admin.html')
+    res.redirect('/')
   })
 
-  // 动态认证：同时检查环境变量和存储中设置的密码
-  let cachedStoredKey: string | null | undefined = undefined // undefined = 未加载, null = 无
-  async function getEffectiveKey(): Promise<string> {
-    if (config.apiKey) return config.apiKey
-    if (cachedStoredKey === undefined) {
-      const stored = await storage.get<string>(API_KEY_STORAGE_KEY)
-      cachedStoredKey = stored || null
+  // SPA fallback: 所有非 API、非静态文件路由返回 index.html
+  app.get('*', (_req, res, next) => {
+    // 仅对非 API 路径且 Accept HTML 的请求返回 SPA 入口
+    if (_req.path.startsWith('/api') || !_req.accepts('html')) {
+      next()
+      return
     }
-    return cachedStoredKey || ''
-  }
-  function refreshStoredKey() {
-    cachedStoredKey = undefined
-  }
+    res.sendFile(path.resolve(__dirname, '../public/index.html'))
+  })
 
-  // 覆盖 auth 中间件为动态版本
+  // ===== 会话认证系统 =====
+  const sessionAuth = new SessionAuth(storage, config.apiKey)
+
+  // 认证中间件：验证 Bearer Token（会话令牌，非密码）
   const dynamicAuth = async (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction): Promise<void> => {
-    const effectiveKey = await getEffectiveKey()
-    if (!effectiveKey) {
+    const passwordSet = await sessionAuth.isPasswordSet()
+    if (!passwordSet) {
+      // 未设置密码，直接放行
       next()
       return
     }
@@ -96,8 +98,14 @@ export function createServer(
       res.status(401).json({ error: 'Unauthorized' })
       return
     }
-    if (authHeader.slice(7) !== effectiveKey) {
-      res.status(401).json({ error: 'Unauthorized' })
+    const token = authHeader.slice(7)
+    const result = sessionAuth.validateToken(token)
+    if (!result.valid) {
+      if (result.expired) {
+        res.status(401).json({ error: 'Token expired', code: 'TOKEN_EXPIRED' })
+      } else {
+        res.status(401).json({ error: 'Unauthorized' })
+      }
       return
     }
     next()
@@ -130,7 +138,7 @@ export function createServer(
 <body>
 <h1>WeClawBot Bridge</h1>
 <p class="sub">微信 ↔ OpenClaw AI Agent 桥接网关</p>
-<p style="margin-bottom:16px"><a href="/admin" style="color:#4f46e5;font-size:14px">打开管理面板</a></p>
+<p style="margin-bottom:16px"><a href="/" style="color:#4f46e5;font-size:14px">打开管理面板</a></p>
 <div class="card">
   <h3>Bot 状态</h3>
   <p>在线状态：<span class="badge ${status.loggedIn ? 'online' : 'offline'}">${status.loggedIn ? '在线' : '离线'}</span></p>
@@ -164,78 +172,90 @@ export function createServer(
 
   // ===== 认证 API =====
   app.post('/api/auth/login', async (req, res) => {
-    const { password } = req.body
-    const storedKey = await storage.get<string>(API_KEY_STORAGE_KEY)
-    const effectiveKey = config.apiKey || storedKey || ''
+    const v = validate(LoginSchema, req.body)
+    if (!v.ok) { res.status(400).json({ error: v.error }); return }
+    const { password } = v.data
+    const passwordSet = await sessionAuth.isPasswordSet()
 
-    if (!effectiveKey) {
-      // 未设置密码，直接放行
-      res.json({ authenticated: true, token: '' })
+    if (!passwordSet) {
+      // 未设置密码，提示先设置密码
+      res.status(403).json({ error: '请先设置管理密码', code: 'PASSWORD_NOT_SET' })
       return
     }
 
-    if (password !== effectiveKey) {
+    if (!password) {
+      res.status(400).json({ error: '请输入密码' })
+      return
+    }
+
+    const session = await sessionAuth.login(password)
+    if (!session) {
       res.status(401).json({ error: '密码错误' })
       return
     }
 
-    res.json({ authenticated: true, token: effectiveKey })
+    res.json({ authenticated: true, token: session.token, expiresAt: session.expiresAt })
   })
 
   app.get('/api/auth/status', async (req, res) => {
     const authHeader = req.headers.authorization
     const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
 
-    const storedKey = await storage.get<string>(API_KEY_STORAGE_KEY)
-    const effectiveKey = config.apiKey || storedKey || ''
-
-    if (!effectiveKey) {
-      res.json({ authenticated: true, passwordSet: false })
+    const passwordSet = await sessionAuth.isPasswordSet()
+    if (!passwordSet) {
+      // 未设置密码：不认为已认证，强制用户先设置密码
+      res.json({ authenticated: false, passwordSet: false })
       return
     }
 
-    res.json({ authenticated: token === effectiveKey, passwordSet: true })
+    const result = sessionAuth.validateToken(token)
+    if (result.expired) {
+      res.json({ authenticated: false, passwordSet: true, expired: true })
+      return
+    }
+
+    res.json({ authenticated: result.valid, passwordSet: true })
   })
 
   app.post('/api/auth/setup', async (req, res) => {
     // 首次设置密码（仅在未设置时允许）
-    const storedKey = await storage.get<string>(API_KEY_STORAGE_KEY)
-    const effectiveKey = config.apiKey || storedKey || ''
-
-    if (effectiveKey) {
+    const passwordSet = await sessionAuth.isPasswordSet()
+    if (passwordSet) {
       res.status(403).json({ error: '密码已设置，请使用修改密码接口' })
       return
     }
 
-    const { password } = req.body
-    if (!password || password.length < 4) {
-      res.status(400).json({ error: '密码至少4位' })
-      return
-    }
+    const v = validate(SetupSchema, req.body)
+    if (!v.ok) { res.status(400).json({ error: v.error }); return }
+    const { password } = v.data
 
-    await storage.set(API_KEY_STORAGE_KEY, password)
-    refreshStoredKey()
-    res.json({ ok: true, token: password })
+    await sessionAuth.setPassword(password)
+
+    // 设置密码后自动登录，返回会话 Token
+    const session = await sessionAuth.login(password)
+    res.json({ ok: true, token: session!.token, expiresAt: session!.expiresAt })
   })
 
   app.post('/api/auth/change-password', dynamicAuth, async (req, res) => {
-    const { oldPassword, newPassword } = req.body
-    const storedKey = await storage.get<string>(API_KEY_STORAGE_KEY)
-    const effectiveKey = config.apiKey || storedKey || ''
+    const v = validate(ChangePasswordSchema, req.body)
+    if (!v.ok) { res.status(400).json({ error: v.error }); return }
+    const { oldPassword, newPassword } = v.data
 
-    if (oldPassword !== effectiveKey) {
+    const success = await sessionAuth.changePassword(oldPassword, newPassword)
+    if (!success) {
       res.status(401).json({ error: '旧密码错误' })
       return
     }
 
-    if (!newPassword || newPassword.length < 4) {
-      res.status(400).json({ error: '新密码至少4位' })
-      return
-    }
+    // 密码修改成功后自动重新登录
+    const session = await sessionAuth.login(newPassword)
+    res.json({ ok: true, token: session!.token, expiresAt: session!.expiresAt })
+  })
 
-    await storage.set(API_KEY_STORAGE_KEY, newPassword)
-    refreshStoredKey()
-    res.json({ ok: true, token: newPassword })
+  app.post('/api/auth/logout', dynamicAuth, (req, res) => {
+    const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : ''
+    sessionAuth.logout(token)
+    res.json({ ok: true })
   })
 
   app.get('/api/health', (_req, res) => {
@@ -272,16 +292,23 @@ export function createServer(
     res.json(botManager.getStatus())
   })
 
-  app.get('/api/config', async (_req, res) => {
-    const apiKey = await storage.get<string>(API_KEY_STORAGE_KEY)
-    res.json({ apiKey: apiKey || '' })
+  app.get('/api/config', dynamicAuth, async (_req, res) => {
+    const passwordSet = await sessionAuth.isPasswordSet()
+    res.json({ apiKeySet: passwordSet })
   })
 
   app.post('/api/config', dynamicAuth, async (req, res) => {
     try {
       const { apiKey } = req.body
       if (apiKey !== undefined) {
-        await storage.set(API_KEY_STORAGE_KEY, apiKey)
+        if (apiKey) {
+          await sessionAuth.setPassword(apiKey)
+        } else {
+          // 清空密码：同时删除旧明文 key 和新哈希 key
+          await storage.delete(API_KEY_STORAGE_KEY)
+          await storage.delete('config:api_key_hash')
+          sessionAuth.logout()
+        }
       }
       res.json({ ok: true })
     } catch (err) {
@@ -295,15 +322,43 @@ export function createServer(
     try {
       const agents = agentRegistry.listAll()
       const sessionConfig = await sessionManager.getConfig()
-      const apiKey = await storage.get<string>(API_KEY_STORAGE_KEY)
+      const notifyRules = notificationService.listRules()
+
+      // 导出全部存储数据
+      const allKeys = await storage.listKeys()
+      const storageDump: Record<string, unknown> = {}
+      for (const key of allKeys) {
+        const val = await storage.get(key)
+        if (val !== undefined) storageDump[key] = val
+      }
+
+      // 导出会话列表
+      const sessionKeys = allKeys.filter(k => k.startsWith('session:') && k !== 'session:config')
+      const sessions: unknown[] = []
+      for (const key of sessionKeys) {
+        const val = await storage.get(key)
+        if (val !== undefined) sessions.push(val)
+      }
+
+      // 导出通知日志
+      const notifyLogKeys = allKeys.filter(k => k.startsWith('notify:log:'))
+      const notifyLogs: unknown[] = []
+      for (const key of notifyLogKeys) {
+        const val = await storage.get(key)
+        if (val !== undefined) notifyLogs.push(val)
+      }
 
       const backup = {
-        version: 1,
+        version: 2,
         exportedAt: new Date().toISOString(),
         agents,
         defaultAgentId: config.defaultAgentId,
         session: sessionConfig,
-        apiKey: apiKey || undefined,
+        notifications: notifyRules,
+        sessions,
+        notifyLogs,
+        storageDump,
+        // apiKey 不导出，防止密钥泄露
       }
 
       res.setHeader('Content-Type', 'application/json')
@@ -317,33 +372,83 @@ export function createServer(
 
   app.post('/api/config/import', dynamicAuth, async (req, res) => {
     try {
-      const backup = req.body
-      if (!backup || !Array.isArray(backup.agents)) {
-        res.status(400).json({ error: '无效的备份文件：缺少 agents 数组' })
-        return
+      // 旧版备份兼容：补全缺失的必填字段
+      const raw = req.body as Record<string, unknown>
+      if (raw.agents && Array.isArray(raw.agents)) {
+        for (const agent of raw.agents as Record<string, unknown>[]) {
+          if (!agent.description) agent.description = agent.name as string || ''
+          if (!agent.timeout) agent.timeout = 30000
+          if (!agent.type) agent.type = 'http'
+          if (!agent.command) agent.command = agent.id as string || ''
+        }
       }
+      const v = validate(ConfigImportSchema, raw)
+      if (!v.ok) { res.status(400).json({ error: `无效的备份文件：${v.error}` }); return }
+      const backup = v.data
 
       // 导入 Agent
       for (const agent of agentRegistry.listAll()) {
         agentRegistry.unregister(agent.id)
       }
-      for (const agent of backup.agents) {
+      for (const agent of backup.agents!) {
         agentRegistry.register(agent)
       }
       commandHandler.updateAgents(agentRegistry.listAll())
-      saveAgents(agentRegistry.listAll(), backup.defaultAgentId || config.defaultAgentId)
+      await saveAgents(agentRegistry.listAll(), backup.defaultAgentId || config.defaultAgentId)
 
       // 导入会话配置
       if (backup.session) {
         await sessionManager.updateConfig(backup.session.maxRounds, backup.session.expireMs)
       }
 
-      // 导入 API Key（可选）
+      // 导入 API Key（可选，使用 bcrypt 哈希存储）
       if (backup.apiKey) {
-        await storage.set(API_KEY_STORAGE_KEY, backup.apiKey)
+        await sessionAuth.setPassword(backup.apiKey)
       }
 
-      res.json({ ok: true, agents: backup.agents.length, session: !!backup.session })
+      // v2 新增：导入通知规则
+      let notifyCount = 0
+      if (backup.notifications && backup.notifications.length > 0) {
+        notificationService.replaceAllRules(backup.notifications)
+        notifyCount = backup.notifications.length
+      }
+
+      // v2 新增：导入全部存储数据（会话、通知日志、上下文令牌等）
+      let storageCount = 0
+      if (backup.storageDump && Object.keys(backup.storageDump).length > 0) {
+        for (const [key, value] of Object.entries(backup.storageDump)) {
+          await storage.set(key, value)
+          storageCount++
+        }
+      } else {
+        // 兼容 v1 或无 storageDump 的备份：单独恢复 sessions 和 notifyLogs
+        if (backup.sessions && backup.sessions.length > 0) {
+          for (const session of backup.sessions) {
+            const s = session as { userId?: string; agentId?: string }
+            if (s.userId && s.agentId) {
+              await storage.set(`session:${s.userId}:${s.agentId}`, session)
+              storageCount++
+            }
+          }
+        }
+        if (backup.notifyLogs && backup.notifyLogs.length > 0) {
+          for (const log of backup.notifyLogs) {
+            const l = log as { id?: string }
+            if (l.id) {
+              await storage.set(`notify:log:${l.id}`, log)
+              storageCount++
+            }
+          }
+        }
+      }
+
+      res.json({
+        ok: true,
+        agents: backup.agents!.length,
+        session: !!backup.session,
+        notifications: notifyCount,
+        storageKeys: storageCount,
+      })
     } catch (err) {
       const error = err as Error
       res.status(500).json({ error: error.message })
@@ -354,19 +459,21 @@ export function createServer(
     res.json(agentRegistry.listAll())
   })
 
-  app.post('/api/agents', dynamicAuth, (req, res) => {
+  app.post('/api/agents', dynamicAuth, async (req, res) => {
     try {
-      agentRegistry.register(req.body)
+      const v = validate(AgentConfigSchema, req.body)
+      if (!v.ok) { res.status(400).json({ error: v.error }); return }
+      agentRegistry.register(v.data)
       commandHandler.updateAgents(agentRegistry.listAll())
-      saveAgents(agentRegistry.listAll(), config.defaultAgentId)
-      res.status(201).json(req.body)
+      await saveAgents(agentRegistry.listAll(), config.defaultAgentId)
+      res.status(201).json(v.data)
     } catch (err) {
       const error = err as Error
       res.status(400).json({ error: error.message })
     }
   })
 
-  app.put('/api/agents/:id', dynamicAuth, (req, res) => {
+  app.put('/api/agents/:id', dynamicAuth, async (req, res) => {
     try {
       const existing = agentRegistry.get(req.params.id as string)
       if (!existing) {
@@ -382,7 +489,7 @@ export function createServer(
       agentRegistry.unregister(existing.id)
       agentRegistry.register(updated)
       commandHandler.updateAgents(agentRegistry.listAll())
-      saveAgents(agentRegistry.listAll(), config.defaultAgentId)
+      await saveAgents(agentRegistry.listAll(), config.defaultAgentId)
       res.json(updated)
     } catch (err) {
       const error = err as Error
@@ -391,13 +498,13 @@ export function createServer(
   })
 
   // Must come before /api/agents/:id to catch empty-ID case
-  app.delete('/api/agents/', dynamicAuth, (req, res) => {
+  app.delete('/api/agents/', dynamicAuth, async (req, res) => {
     try {
       const agent = agentRegistry.get('')
       if (!agent) { res.status(404).json({ error: 'No agent with empty ID' }); return }
       agentRegistry.unregister('')
       commandHandler.updateAgents(agentRegistry.listAll())
-      saveAgents(agentRegistry.listAll(), config.defaultAgentId)
+      await saveAgents(agentRegistry.listAll(), config.defaultAgentId)
       res.json({ ok: true })
     } catch (err) {
       const error = err as Error
@@ -405,11 +512,11 @@ export function createServer(
     }
   })
 
-  app.delete('/api/agents/:id', dynamicAuth, (req, res) => {
+  app.delete('/api/agents/:id', dynamicAuth, async (req, res) => {
     try {
       agentRegistry.unregister(req.params.id as string)
       commandHandler.updateAgents(agentRegistry.listAll())
-      saveAgents(agentRegistry.listAll(), config.defaultAgentId)
+      await saveAgents(agentRegistry.listAll(), config.defaultAgentId)
       res.json({ ok: true })
     } catch (err) {
       const error = err as Error
@@ -474,8 +581,10 @@ export function createServer(
 
   app.post('/api/notify/rules', dynamicAuth, (req, res) => {
     try {
-      notificationService.addRule(req.body)
-      res.status(201).json(req.body)
+      const v = validate(NotifyRuleSchema, req.body)
+      if (!v.ok) { res.status(400).json({ error: v.error }); return }
+      notificationService.addRule(v.data)
+      res.status(201).json(v.data)
     } catch (err) {
       const error = err as Error
       res.status(400).json({ error: error.message })
@@ -574,9 +683,11 @@ export function createServer(
 
   app.put('/api/sessions/config', dynamicAuth, async (req, res) => {
     try {
-      const { maxRounds, expireMs } = req.body
-      const config = await sessionManager.updateConfig(maxRounds, expireMs)
-      res.json(config)
+      const v = validate(SessionConfigSchema, req.body)
+      if (!v.ok) { res.status(400).json({ error: v.error }); return }
+      const { maxRounds, expireMs } = v.data
+      const cfg = await sessionManager.updateConfig(maxRounds, expireMs)
+      res.json(cfg)
     } catch (err) {
       const error = err as Error
       res.status(500).json({ error: error.message })

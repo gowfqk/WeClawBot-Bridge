@@ -3,6 +3,9 @@ import type { UserStateManager } from './user-state'
 import type { AgentRegistry } from './agent-registry'
 import type { SessionManager } from './session-manager'
 import type { BotManager } from './bot-manager'
+import { createLogger } from './logger'
+
+const log = createLogger('message-handler')
 import type { ChatEntry } from './types'
 
 export interface MessageHandlerContext {
@@ -141,7 +144,7 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
       }
     } catch (err) {
       const error = err as Error
-      console.error('Message handler error:', error.message)
+      log.error({ err: error.message }, 'Message handler error')
       try {
         await reply('服务繁忙，请稍后再试。')
       } catch {

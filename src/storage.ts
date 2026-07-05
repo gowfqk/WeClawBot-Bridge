@@ -48,8 +48,15 @@ export class FileStorage implements Storage {
   }
 
   private keyPath(key: string): string {
-    const safeKey = key.replace(/[^a-zA-Z0-9_\-]/g, '_')
-    return path.join(this.baseDir, this.namespace, `${safeKey}.json`)
+    // 使用 SHA-256 hash 避免碰撞（如 a:b 和 a_b 映射到同一文件）
+    const hash = crypto.createHash('sha256').update(key).digest('hex')
+    return path.join(this.baseDir, this.namespace, `${hash}.json`)
+  }
+
+  /** Write a sidecar file to store the original key for listKeys reverse lookup */
+  private metaPath(key: string): string {
+    const hash = crypto.createHash('sha256').update(key).digest('hex')
+    return path.join(this.baseDir, this.namespace, `${hash}.key`)
   }
 
   async get<T>(key: string): Promise<T | undefined> {
@@ -65,13 +72,17 @@ export class FileStorage implements Storage {
   async set<T>(key: string, value: T): Promise<void> {
     const filePath = this.keyPath(key)
     await fs.mkdir(path.dirname(filePath), { recursive: true })
-    await fs.writeFile(filePath, JSON.stringify(value), 'utf-8')
+    await Promise.all([
+      fs.writeFile(filePath, JSON.stringify(value), 'utf-8'),
+      fs.writeFile(this.metaPath(key), key, 'utf-8'),
+    ])
   }
 
   async delete(key: string): Promise<void> {
     const filePath = this.keyPath(key)
+    const metaPath = this.metaPath(key)
     try {
-      await fs.unlink(filePath)
+      await Promise.all([fs.unlink(filePath), fs.unlink(metaPath)])
     } catch {
       // file not found, ok
     }
@@ -100,10 +111,14 @@ export class FileStorage implements Storage {
     const dir = path.join(this.baseDir, this.namespace)
     try {
       const files = await fs.readdir(dir)
-      const keys = files
-        .filter(f => f.endsWith('.json'))
-        .map(f => f.slice(0, -5)) // remove .json extension
-      if (prefix) return keys.filter(k => k.startsWith(prefix))
+      const keyFiles = files.filter(f => f.endsWith('.key'))
+      const keys: string[] = []
+      for (const kf of keyFiles) {
+        const originalKey = await fs.readFile(path.join(dir, kf), 'utf-8')
+        if (!prefix || originalKey.startsWith(prefix)) {
+          keys.push(originalKey)
+        }
+      }
       return keys
     } catch {
       return []

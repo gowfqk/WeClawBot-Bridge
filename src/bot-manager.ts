@@ -1,5 +1,8 @@
 import { WeChatBot, type Storage } from '@wechatbot/wechatbot'
 import type { BotStatus, SendContent as GatewaySendContent } from './types'
+import { createLogger } from './logger'
+
+const log = createLogger('bot-manager')
 
 export type MessageHandler = (msg: {
   userId: string
@@ -38,16 +41,16 @@ export class BotManager {
     })
 
     this.bot.on('session:expired', () => {
-      console.warn('Session expired, attempting auto-reconnect...')
+      log.warn('Session expired, attempting auto-reconnect...')
       this.status = { loggedIn: false, polling: false }
       this.isStarted = false
       this.stopKeepalive()
       // 自动重连
       this.loginAndStart(this.qrCallback).then(() => {
-        console.log('Auto-reconnect succeeded')
+        log.info('Auto-reconnect succeeded')
         this.startKeepalive()
       }).catch((err) => {
-        console.error('Auto-reconnect failed:', (err as Error).message)
+        log.error({ err }, 'Auto-reconnect failed')
       })
     })
 
@@ -81,7 +84,7 @@ export class BotManager {
               this.qrRefreshTimer = null
               if (!this.status.loggedIn) {
                 this.login().catch((err) => {
-                  console.error('QR auto-refresh failed:', (err as Error).message)
+                  log.error({ err }, 'QR auto-refresh failed')
                 })
               }
             }, 1500)
@@ -99,23 +102,23 @@ export class BotManager {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         await this.login(onQrUrl)
-        console.log('Bot logged in, starting message polling...')
+        log.info('Bot logged in, starting message polling...')
         this.isStarted = true
         this.status.polling = true
         this.bot.start().catch((err) => {
-          console.error('Poller crashed:', (err as Error).message)
+          log.error({ err }, 'Poller crashed')
           this.status.polling = false
           this.isStarted = false
         })
         return
       } catch (err) {
         const error = err as Error
-        console.error(`Login attempt ${attempt}/${maxRetries} failed: ${error.message}`)
+        log.error({ attempt, maxRetries, err: error.message }, 'Login attempt failed')
         if (attempt >= maxRetries) {
-          console.error('All login attempts exhausted')
+          log.error('All login attempts exhausted')
           throw err
         }
-        console.log(`Retrying in 5 seconds...`)
+        log.info('Retrying in 5 seconds...')
         await new Promise((r) => setTimeout(r, 5000))
       }
     }
@@ -126,7 +129,7 @@ export class BotManager {
     this.isStarted = true
     this.status.polling = true
     this.bot.start().catch((err) => {
-      console.error('Poller crashed:', (err as Error).message)
+      log.error({ err }, 'Poller crashed')
       this.status.polling = false
       this.isStarted = false
     })
@@ -141,12 +144,12 @@ export class BotManager {
       if (!this.status.loggedIn || !this.status.currentUser) return
       const user = this.status.currentUser
       this.bot.send(user, { text: '🏓' }).then(() => {
-        console.log(`Keepalive ping sent to ${user}`)
+        log.info({ user }, 'Keepalive ping sent')
       }).catch((err) => {
-        console.error('Keepalive ping failed:', (err as Error).message)
+        log.error({ err }, 'Keepalive ping failed')
       })
     }, this.KEEPALIVE_INTERVAL)
-    console.log(`Keepalive started (interval: ${this.KEEPALIVE_INTERVAL / 3600000}h)`)
+    log.info({ intervalHours: this.KEEPALIVE_INTERVAL / 3600000 }, 'Keepalive started')
   }
 
   /** 停止心跳 */
@@ -159,6 +162,10 @@ export class BotManager {
 
   async stop(): Promise<void> {
     this.stopKeepalive()
+    if (this.qrRefreshTimer) {
+      clearTimeout(this.qrRefreshTimer)
+      this.qrRefreshTimer = null
+    }
     this.isStarted = false
     this.status.polling = false
     this.bot.stop()

@@ -4,3 +4,6 @@ dist
 .wechatbot-gateway
 .env
 *.md
+# 前端源码（Dockerfile 多阶段构建处理）
+frontend/node_modules
+frontend/src

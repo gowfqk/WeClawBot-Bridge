@@ -10,7 +10,7 @@ import { NotificationService } from './notification'
 import { createMessageHandler } from './message-handler'
 import { createServer } from './server'
 import { botStatus } from './metrics'
-import pino from 'pino'
+import { logger } from './logger'
 
 async function main(): Promise<void> {
   const config = loadConfig()
@@ -22,8 +22,6 @@ async function main(): Promise<void> {
   const botStorage = config.encryptionKey
     ? new EncryptedStorage(rawStorage, config.encryptionKey)
     : rawStorage
-
-  const logger = pino({ level: config.logLevel })
 
   const userState = new UserStateManager(rawStorage, config.defaultAgentId)
 
@@ -70,30 +68,39 @@ async function main(): Promise<void> {
   const server = http.createServer(app)
 
   server.listen(config.port, () => {
-    console.log(`Gateway server listening on port ${config.port}`)
-    console.log(`Agents loaded: ${agentRegistry.listAll().length}`)
+    logger.info({ port: config.port }, 'Gateway server listening')
+    logger.info({ count: agentRegistry.listAll().length }, 'Agents loaded')
   })
 
   botManager.loginAndStart((url) => {
-    console.log(`QR Code URL: ${url}`)
-    console.log('Scan the QR code with WeChat to login')
+    logger.info({ url }, 'QR Code URL generated — scan with WeChat to login')
   }).then(() => {
     botStatus.set(1)
     botManager.startKeepalive()
   }).catch((err) => {
-    console.error('Failed to login after retries:', err.message)
-    console.log('Use POST /api/bot/login to try again manually')
+    logger.error({ err }, 'Failed to login after retries')
+    logger.info('Use POST /api/bot/login to try again manually')
   })
 
   notificationService.startScheduler()
 
   const shutdown = async () => {
-    console.log('Shutting down...')
+    logger.info('Shutting down...')
     notificationService.stopScheduler()
     agentRegistry.closeAllCliSessions()
     await botManager.stop()
-    server.close()
-    process.exit(0)
+
+    // 优雅关闭：停止接受新连接，等待现有请求完成
+    server.close(() => {
+      logger.info('HTTP server closed')
+      process.exit(0)
+    })
+
+    // 5 秒超时强制退出
+    setTimeout(() => {
+      logger.warn('Forced shutdown after timeout')
+      process.exit(1)
+    }, 5000).unref()
   }
 
   process.on('SIGTERM', shutdown)
@@ -101,6 +108,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('Fatal error:', err)
+  logger.fatal({ err }, 'Fatal error')
   process.exit(1)
 })
