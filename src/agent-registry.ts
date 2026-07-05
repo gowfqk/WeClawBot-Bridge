@@ -159,6 +159,7 @@ export class AgentRegistry {
     }
 
     if (agent.model) body.model = agent.model
+    if (agent.apiKey) body.api_key = agent.apiKey
     return body
   }
 
