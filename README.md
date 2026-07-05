@@ -11,7 +11,7 @@
 - **会话管理**：自动维护每用户 × 每 Agent 的对话历史，可配置最大轮次和过期时间；Web 面板支持查看/删除/清空会话，默认永不过期
 - **自动刷新二维码**：微信登录二维码过期后自动重新获取，管理面板实时显示刷新状态
 - **Webhook**：外部程序（GitHub Actions 等）无需 userId，Bot 在线即可推送消息到微信
-- **通知系统**：管理面板一键发送通知，支持文本 / 文件 / 带注释文件
+- **通知系统**：管理面板一键发送通知，支持文本 / Markdown / 文件 / 带注释文件
 - **详细错误提示**：HTTP 404/401/429/5xx/超时分别返回具体原因，不再笼统报「服务繁忙」
 - **管理面板**：Vue 3 + Naive UI 现代化 SPA，深色主题，响应式布局，移动端友好；内置完整 API 参考文档
 - **安全认证**：管理面板密码登录保护，支持修改密码；API 路由 CSRF 防护
@@ -165,10 +165,20 @@ docker run -d \
 ### Webhook 使用示例
 
 ```bash
-# 无需 userId，Bot 在线即可发送
+# 纯文本
 curl -X POST https://your-domain/api/webhook \
   -H "Content-Type: application/json" \
   -d '{"content":{"text":"部署完成 ✅"}}'
+
+# Markdown 格式（微信支持渲染）
+curl -X POST https://your-domain/api/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"content":{"text":"**部署报告**\n| 项目 | 状态 |\n|------|------|\n| 前端 | ✅ |\n| 后端 | ✅ |"}}'
+
+# 简写格式
+curl -X POST https://your-domain/api/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"text":"部署完成 ✅"}'
 
 # 指定接收人
 curl -X POST https://your-domain/api/webhook \
