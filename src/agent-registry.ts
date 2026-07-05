@@ -287,18 +287,12 @@ export class AgentRegistry {
         return text ? { reply: { text } } : { reply: { text: this.defaultFallbackText } }
       }
 
-      if (agent.streaming && agent.format === 'qwenpaw') {
+      if (agent.format === 'qwenpaw') {
         const text = await this.readQwenPawSSE(response)
         return text ? { reply: { text } } : { reply: { text: this.defaultFallbackText } }
       }
 
       const data = (await response.json()) as Record<string, unknown>
-
-      // QwenPaw non-streaming response
-      if (agent.format === 'qwenpaw') {
-        const text = this.extractQwenPawText(data)
-        return text ? { reply: { text } } : { reply: { text: this.defaultFallbackText } }
-      }
 
       const text = agent.responsePath
         ? this.extractByPath(data, agent.responsePath)
