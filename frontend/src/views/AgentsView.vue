@@ -46,14 +46,28 @@
         <template v-if="form.type === 'ws-remote'">
           <n-grid :cols="2" :x-gap="16">
             <n-form-item-gi label="Agent Token" path="apiKey">
-              <n-input v-model:value="form.apiKey" type="password" show-password-on="click" placeholder="插件连接用 Token（管理面板生成）" />
+              <n-input-group>
+                <n-input v-model:value="form.apiKey" type="password" show-password-on="click" placeholder="点击右侧按钮自动生成" style="flex:1" />
+                <n-button type="primary" @click="handleGenerateToken" :loading="tokenGenerating" :disabled="!form.id" style="margin-left:8px">
+                  生成 Token
+                </n-button>
+              </n-input-group>
             </n-form-item-gi>
             <n-form-item-gi label="超时 (ms)" path="timeout">
               <n-input-number v-model:value="form.timeout" :min="5000" :step="5000" style="width: 100%" />
             </n-form-item-gi>
           </n-grid>
-          <n-alert type="info" style="margin-bottom: 12px">
-            WS Remote 类型：Agent 通过插件主动连接 Bridge，无需起 HTTP 服务。在管理面板生成 Token，Agent 端使用 weclawbot-agent-plugin 连接。
+          <n-alert v-if="!form.id" type="warning" style="margin-bottom: 12px">
+            请先填写 Agent ID，再生成 Token。
+          </n-alert>
+          <n-alert v-if="wsInstallCmd" type="success" style="margin-bottom: 12px" title="✅ 安装命令（复制到 Agent 端执行）">
+            <n-code :code="wsInstallCmd" language="bash" word-break style="margin-top: 4px" />
+            <n-button size="small" type="primary" style="margin-top: 8px" @click="copyInstallCmd">
+              📋 复制安装命令
+            </n-button>
+          </n-alert>
+          <n-alert v-else type="info" style="margin-bottom: 12px">
+            WS Remote 类型：Agent 通过插件主动连接 Bridge，无需起 HTTP 服务。填写 ID 后点击「生成 Token」，获取安装命令。
           </n-alert>
         </template>
 
@@ -154,7 +168,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, h } from 'vue'
+import { ref, computed, onMounted, onUnmounted, h } from 'vue'
 import { useMessage, useDialog, NButton, NSpace, NTag } from 'naive-ui'
 import { api } from '../composables/api'
 import type { FormInst, DataTableColumns } from 'naive-ui'
@@ -243,6 +257,19 @@ const columns: DataTableColumns<Agent> = [
     title: '类型', key: 'type', width: 80,
     render: (row) => h(NTag, { type: row.type === 'http' ? 'info' : 'warning', size: 'small', round: true }, () => row.type.toUpperCase()),
   },
+  {
+    title: '状态', key: 'status', width: 80,
+    render: (row) => {
+      if (row.type !== 'ws-remote') return h('span', { style: 'color:#999' }, '—')
+      const online = !!wsOnlineMap.value[row.id]
+      return h(NTag, {
+        type: online ? 'success' : 'error',
+        size: 'small',
+        round: true,
+        bordered: false,
+      }, () => online ? '在线' : '离线')
+    },
+  },
   { title: '描述', key: 'description', ellipsis: { tooltip: true } },
   {
     title: '操作', key: 'actions', width: 160,
@@ -263,13 +290,87 @@ const testMessage = ref('')
 const testLoading = ref(false)
 const testResult = ref<{ text: string; elapsed: number } | null>(null)
 
+// WS Remote: token 生成 & 安装命令
+const tokenGenerating = ref(false)
+const wsInstallCmd = ref('')
+
+async function handleGenerateToken() {
+  if (!form.value.id) {
+    message.warning('请先填写 Agent ID')
+    return
+  }
+  tokenGenerating.value = true
+  try {
+    // 先确保 agent 已注册（如果还没提交过，先创建）
+    const agentId = form.value.id
+    const res = await api.post<{ agentId: string; token: string }>(`/api/ws-agents/${agentId}/token`)
+    form.value.apiKey = res.token
+    // 生成安装命令
+    const bridgeUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/agent`
+    wsInstallCmd.value = [
+      `npm install weclawbot-agent-plugin`,
+      ``,
+      `node -e "`,
+      `const { WeClawBotAgent } = require('weclawbot-agent-plugin');`,
+      `const agent = new WeClawBotAgent({`,
+      `  bridgeUrl: '${bridgeUrl}',`,
+      `  agentId: '${agentId}',`,
+      `  token: '${res.token}',`,
+      `  name: '${form.value.name || agentId}',`,
+      `  command: '${form.value.command || agentId}',`,
+      `}, (status) => console.log('状态:', status));`,
+      ``,
+      `agent.onMessage(async (msg) => {`,
+      `  // 替换为你的 AI 调用逻辑`,
+      `  return { text: 'Echo: ' + msg.text };`,
+      `});`,
+      ``,
+      `agent.connect();`,
+      `"`,
+    ].join('\n')
+    message.success('Token 已生成，复制下方命令到 Agent 端即可接入')
+  } catch (e: any) {
+    message.error(e.message || 'Token 生成失败')
+  } finally {
+    tokenGenerating.value = false
+  }
+}
+
+function copyInstallCmd() {
+  navigator.clipboard.writeText(wsInstallCmd.value).then(
+    () => message.success('已复制到剪贴板'),
+    () => message.error('复制失败，请手动选中复制'),
+  )
+}
+
 async function loadAgents() {
   try {
     agents.value = await api.get<Agent[]>('/api/agents')
+    // 同时加载 WS Remote 在线状态
+    await loadWsOnline()
   } catch (e: any) {
     message.error(e.message)
   }
 }
+
+// WS Remote 在线状态
+const wsOnlineMap = ref<Record<string, { connectedAt: number; lastActivity: number }>>({})
+
+async function loadWsOnline() {
+  try {
+    const res = await api.get<{ agents: Array<{ agentId: string; connectedAt: number; lastActivity: number }> }>('/api/ws-agents')
+    const map: Record<string, { connectedAt: number; lastActivity: number }> = {}
+    for (const a of res.agents) {
+      map[a.agentId] = { connectedAt: a.connectedAt, lastActivity: a.lastActivity }
+    }
+    wsOnlineMap.value = map
+  } catch {
+    // 忽略，可能未启用
+  }
+}
+
+// 定时刷新在线状态
+let wsOnlineTimer: ReturnType<typeof setInterval> | null = null
 
 function startEdit(agent: Agent) {
   editingId.value = agent.id
@@ -281,6 +382,7 @@ function cancelEdit() {
   editingId.value = null
   form.value = defaultForm()
   cliArgsText.value = ''
+  wsInstallCmd.value = ''
 }
 
 async function handleSubmit() {
@@ -303,10 +405,49 @@ async function handleSubmit() {
       message.success('Agent 已更新')
     } else {
       await api.post('/api/agents', payload)
-      message.success('Agent 已添加')
+      // ws-remote 类型：自动生成 token + 安装命令
+      if (payload.type === 'ws-remote' && payload.id) {
+        try {
+          const res = await api.post<{ agentId: string; token: string }>(`/api/ws-agents/${payload.id}/token`)
+          form.value.apiKey = res.token
+          const bridgeUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/agent`
+          wsInstallCmd.value = [
+            `npm install weclawbot-agent-plugin`,
+            ``,
+            `node -e "`,
+            `const { WeClawBotAgent } = require('weclawbot-agent-plugin');`,
+            `const agent = new WeClawBotAgent({`,
+            `  bridgeUrl: '${bridgeUrl}',`,
+            `  agentId: '${payload.id}',`,
+            `  token: '${res.token}',`,
+            `  name: '${payload.name || payload.id}',`,
+            `  command: '${payload.command || payload.id}',`,
+            `}, (status) => console.log('状态:', status));`,
+            ``,
+            `agent.onMessage(async (msg) => {`,
+            `  // 替换为你的 AI 调用逻辑`,
+            `  return { text: 'Echo: ' + msg.text };`,
+            `});`,
+            ``,
+            `agent.connect();`,
+            `"`,
+          ].join('\n')
+          message.success('Agent 已添加，Token 已自动生成！复制下方命令到 Agent 端即可接入')
+        } catch {
+          message.success('Agent 已添加，但 Token 自动生成失败，请手动点击「生成 Token」')
+        }
+      } else {
+        message.success('Agent 已添加')
+      }
     }
-    cancelEdit()
-    await loadAgents()
+    // ws-remote 创建后保留表单（显示安装命令），其他类型关闭
+    if (payload.type === 'ws-remote' && !editingId.value) {
+      // 不调 cancelEdit，保留表单让用户看到安装命令
+      await loadAgents()
+    } else {
+      cancelEdit()
+      await loadAgents()
+    }
   } catch (e: any) {
     message.error(e.message)
   }
@@ -349,5 +490,11 @@ async function handleTest() {
   }
 }
 
-onMounted(loadAgents)
+onMounted(() => {
+  loadAgents()
+  wsOnlineTimer = setInterval(loadWsOnline, 5000)
+})
+onUnmounted(() => {
+  if (wsOnlineTimer) clearInterval(wsOnlineTimer)
+})
 </script>

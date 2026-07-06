@@ -82,6 +82,7 @@ async function main(): Promise<void> {
 
   // ===== WS Agent Server：接受 Agent 主动接入 =====
   const wsAgentServer = new WsAgentServer({
+    storage: rawStorage,
     onAgentConnect: (agentId, info) => {
       logger.info({ agentId, name: info.name, command: info.command }, 'WS Agent 已上线')
       // 动态注册为 ws-remote 类型 Agent
@@ -108,9 +109,12 @@ async function main(): Promise<void> {
     },
   })
 
-  // 为已配置的 ws-remote Agent 设置 token
+  // 加载持久化的 WS Agent token（重启后不丢失）
+  await wsAgentServer.loadPersistedTokens()
+
+  // 为已配置的 ws-remote Agent 设置 token（仅当没有持久化 token 时才用 apiKey）
   for (const agent of config.agents) {
-    if (agent.type === 'ws-remote' && agent.apiKey) {
+    if (agent.type === 'ws-remote' && agent.apiKey && !wsAgentServer.getAgentToken(agent.id)) {
       wsAgentServer.setAgentToken(agent.id, agent.apiKey)
     }
   }

@@ -16,6 +16,7 @@
 import { WebSocketServer, WebSocket } from 'ws'
 import type { Server } from 'node:http'
 import type { AgentPayload, AgentResponse } from './types'
+import type { Storage } from './types'
 import { createLogger } from './logger'
 
 const log = createLogger('ws-agent-server')
@@ -83,19 +84,51 @@ export class WsAgentServer {
   private wss: WebSocketServer | null = null
   private connections: Map<string, ConnectedAgent> = new Map()  // agentId → info
   private agentTokens: Map<string, string> = new Map()          // agentId → token（用于认证）
+  private storage: Storage | null = null                         // 持久化存储
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null
   private onAgentConnect?: (agentId: string, info: { name: string; command: string; description: string; model?: string }) => void
   private onAgentDisconnect?: (agentId: string) => void
   private onAgentPush?: (agentId: string, text: string, userId?: string) => void
 
   constructor(options?: {
+    storage?: Storage
     onAgentConnect?: (agentId: string, info: { name: string; command: string; description: string; model?: string }) => void
     onAgentDisconnect?: (agentId: string) => void
     onAgentPush?: (agentId: string, text: string, userId?: string) => void
   }) {
+    this.storage = options?.storage ?? null
     this.onAgentConnect = options?.onAgentConnect
     this.onAgentDisconnect = options?.onAgentDisconnect
     this.onAgentPush = options?.onAgentPush
+  }
+
+  /** 从 Storage 加载已持久化的 token（启动时调用） */
+  async loadPersistedTokens(): Promise<void> {
+    if (!this.storage) return
+    try {
+      const tokens = await this.storage.get<Record<string, string>>('ws-agent-tokens')
+      if (tokens && typeof tokens === 'object') {
+        for (const [agentId, token] of Object.entries(tokens as Record<string, string>)) {
+          this.agentTokens.set(agentId, token)
+        }
+      }
+    } catch {
+      // 忽略加载失败
+    }
+  }
+
+  /** 持久化所有 token 到 Storage */
+  private async persistTokens(): Promise<void> {
+    if (!this.storage) return
+    try {
+      const tokens: Record<string, string> = {}
+      for (const [agentId, token] of this.agentTokens) {
+        tokens[agentId] = token
+      }
+      await this.storage.set('ws-agent-tokens', tokens)
+    } catch {
+      // 忽略持久化失败
+    }
   }
 
   /** 挂载到 HTTP server 上 */
@@ -168,20 +201,28 @@ export class WsAgentServer {
     log.info({ path }, 'WS Agent Server 已挂载')
   }
 
+  /** 获取 Agent token */
+  getAgentToken(agentId: string): string | undefined {
+    return this.agentTokens.get(agentId)
+  }
+
   /** 设置 Agent 认证 token（由 Bridge 管理面板分配） */
   setAgentToken(agentId: string, token: string): void {
     this.agentTokens.set(agentId, token)
+    this.persistTokens()
   }
 
   /** 移除 Agent token */
   removeAgentToken(agentId: string): void {
     this.agentTokens.delete(agentId)
+    this.persistTokens()
   }
 
   /** 生成 token 并注册 */
   generateToken(agentId: string): string {
     const token = `wsk_${agentId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
     this.agentTokens.set(agentId, token)
+    this.persistTokens()
     return token
   }
 
