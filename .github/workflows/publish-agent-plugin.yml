@@ -16,7 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write  # npm provenance
 
     defaults:
       run:
@@ -62,7 +61,7 @@ jobs:
 
       - name: 发布到 npm
         if: github.event.inputs.dry_run != 'true'
-        run: npm publish --provenance --access public
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
