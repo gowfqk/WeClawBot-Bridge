@@ -166,18 +166,22 @@ export function createServer(
   // 设置认证 cookie 的辅助函数
   const COOKIE_NAME = 'wcbot_session'
   const setAuthCookie = (res: import('express').Response, token: string, expiresAt: number): void => {
-    const maxAge = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000))
+    const maxAge = Math.max(0, expiresAt - Date.now())
+    // Tunnel/反向代理场景：原始请求可能是 HTTPS，但 Node 侧是 HTTP
+    // 通过 X-Forwarded-Proto 判断真实协议
+    const isSecure = res.req?.secure || res.req?.headers['x-forwarded-proto'] === 'https' || process.env.NODE_ENV === 'production'
     res.cookie(COOKIE_NAME, token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: isSecure,
+      sameSite: isSecure ? 'none' : 'lax',
       maxAge,
       path: '/',
     })
   }
 
   const clearAuthCookie = (res: import('express').Response): void => {
-    res.clearCookie(COOKIE_NAME, { path: '/' })
+    const isSecure = res.req?.secure || res.req?.headers['x-forwarded-proto'] === 'https' || process.env.NODE_ENV === 'production'
+    res.clearCookie(COOKIE_NAME, { path: '/', secure: isSecure, sameSite: isSecure ? 'none' : 'lax' })
   }
 
   // ===== 认证 API =====

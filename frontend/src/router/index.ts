@@ -28,13 +28,15 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
-  // 未认证时总是刷新状态
-  if (!auth.isLoggedIn) {
-    await auth.checkStatus()
-  }
 
   // 登录页本身始终可访问
   if (to.meta.public) return true
+
+  // 已认证时信任本地状态，不重复调 API
+  if (auth.isLoggedIn) return true
+
+  // 未认证时刷新状态
+  await auth.checkStatus()
 
   // 未设密码 → 跳到设置密码页
   if (auth.needsSetup) return { name: 'Login' }
