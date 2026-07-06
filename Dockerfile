@@ -39,8 +39,6 @@ RUN apk add --no-cache su-exec
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
-VOLUME ["/app/.wechatbot-gateway"]
-
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 EXPOSE 3000
