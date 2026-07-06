@@ -295,10 +295,10 @@ export function createServer(
 
   app.post('/api/bot/login', dynamicAuth, async (_req, res) => {
     try {
-      // 触发登录（不 await 整个过程，否则等到扫码才返回）
+      // 强制重新走 QR 流程（跳过旧凭据）
       botManager.login((url) => {
         // qrUrl 回调时无需额外处理，getStatus() 会自动拿到
-      }).catch((err) => {
+      }, true).catch((err) => {
         logger.error({ err: (err as Error).message }, 'Background login error')
       })
       // 等一小段时间让 qrUrl 回调触发

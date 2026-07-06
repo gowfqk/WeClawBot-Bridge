@@ -31,6 +31,7 @@ export class BotManager {
     })
 
     this.bot.on('login', (creds) => {
+      log.info({ accountId: creds.accountId }, 'Bot logged in event received')
       this.status = {
         loggedIn: true,
         accountId: creds.accountId,
@@ -65,10 +66,11 @@ export class BotManager {
     })
   }
 
-  async login(onQrUrl?: (url: string) => void): Promise<void> {
+  async login(onQrUrl?: (url: string) => void, force?: boolean): Promise<void> {
     if (onQrUrl) this.qrCallback = onQrUrl
 
     this.loginPromise = this.bot.login({
+      force: force ?? !this.status.loggedIn,
       callbacks: {
         onQrUrl: (url: string) => {
           this.currentQrUrl = url
