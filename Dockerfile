@@ -28,10 +28,20 @@ COPY --from=frontend-build /app/public/ ./public/
 # 清理源码和开发依赖，仅保留运行时
 RUN rm -rf src/ tsconfig.json && npm ci --omit=dev
 
-# 创建非 root 用户运行应用
+# 创建非 root 用户运行应用，并预创建数据目录
 RUN addgroup -S app && adduser -S app -G app && \
+    mkdir -p /app/.wechatbot-gateway/gateway && \
     chown -R app:app /app
-USER app
+
+# 安装 su-exec 用于 entrypoint 降权
+RUN apk add --no-cache su-exec
+
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+VOLUME ["/app/.wechatbot-gateway"]
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 EXPOSE 3000
 
