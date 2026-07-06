@@ -39,7 +39,7 @@ jobs:
         run: npm run build
 
       - name: 验证包内容
-        run: npx npm-packlist
+        run: npm pack --dry-run
 
       - name: 从 tag 提取版本号
         if: startsWith(github.ref, 'refs/tags/agent-plugin-v')
