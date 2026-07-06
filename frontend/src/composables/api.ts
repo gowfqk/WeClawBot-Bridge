@@ -55,8 +55,8 @@ export async function request<T = unknown>(
     ...(options.headers as Record<string, string> || {}),
   }
 
-  // credentials: 'same-origin' 确保同源请求携带 HttpOnly Cookie
-  const res = await fetch(url, { ...options, headers, credentials: 'same-origin' })
+  // credentials: 'include' 确保 HttpOnly Cookie 在所有场景下携带（含 SameSite=None）
+  const res = await fetch(url, { ...options, headers, credentials: 'include' })
 
   if (res.status === 401 || res.status === 403) {
     const data = await res.json().catch(() => ({}))
@@ -89,7 +89,7 @@ export const api = {
 
   /** 下载文件（返回 blob） */
   download: async (url: string) => {
-    const res = await fetch(url, { headers: authHeaders(), credentials: 'same-origin' })
+    const res = await fetch(url, { headers: authHeaders(), credentials: 'include' })
     if (res.status === 401 || res.status === 403) {
       const data = await res.json().catch(() => ({}))
       handleAuthError(res.status, data)
@@ -105,7 +105,7 @@ export const api = {
       method: 'POST',
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
-      credentials: 'same-origin',
+      credentials: 'include',
     })
     if (res.status === 401 || res.status === 403) {
       const err = await res.json().catch(() => ({}))
