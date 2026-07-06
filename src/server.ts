@@ -377,7 +377,7 @@ export function createServer(
         sessions,
         notifyLogs,
         storageDump,
-        // apiKey 不导出，防止密钥泄露
+        // 管理面板密码不导出，需重新设置
       }
 
       res.setHeader('Content-Type', 'application/json')
