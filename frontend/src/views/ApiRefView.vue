@@ -14,23 +14,17 @@
           <!-- 快速上手 -->
           <n-card id="doc-quickstart" title="🚀 快速上手">
             <n-text>三步开始用 WeClawBot 和微信里的 AI 对话：</n-text>
-            <n-steps vertical style="margin-top: 16px">
-              <n-step title="登录微信" status="finish">
-                <template #description>
-                  进入 <n-text code>Bot 控制</n-text> 页面，点击「刷新二维码」，用微信扫码登录。
-                </template>
-              </n-step>
-              <n-step title="添加 Agent" status="finish">
-                <template #description>
-                  进入 <n-text code>Agent 管理</n-text> 页面，添加你的 AI 服务（支持 OpenAI 格式、CLI 工具、WS 插件接入）。
-                </template>
-              </n-step>
-              <n-step title="微信对话" status="finish">
-                <template #description>
-                  在微信中发 <n-text code>#命令</n-text> 切换 Agent，之后直接发消息即可对话。
-                </template>
-              </n-step>
-            </n-steps>
+            <n-ol style="margin-top: 16px">
+              <n-li>
+                <n-text strong>登录微信</n-text> — 进入 <n-text code>Bot 控制</n-text> 页面，点击「刷新二维码」，用微信扫码登录。
+              </n-li>
+              <n-li>
+                <n-text strong>添加 Agent</n-text> — 进入 <n-text code>Agent 管理</n-text> 页面，添加你的 AI 服务（支持 OpenAI 格式、CLI 工具、WS 插件接入）。
+              </n-li>
+              <n-li>
+                <n-text strong>微信对话</n-text> — 在微信中发 <n-text code>#命令</n-text> 切换 Agent，之后直接发消息即可对话。
+              </n-li>
+            </n-ol>
           </n-card>
 
           <!-- 微信命令 -->
@@ -90,28 +84,23 @@
 
               <n-tab-pane name="ws-remote" tab="WS Remote 插件接入">
                 <n-text>AI Agent 通过插件 SDK 主动连接 Bridge，无需起 HTTP 服务：</n-text>
-                <n-steps vertical style="margin-top: 12px">
-                  <n-step title="添加 Agent" status="finish">
-                    <template #description>
-                      类型选 <n-text code>WS Remote (插件接入)</n-text>，填写命令和名称，点击「生成 Token」。
-                    </template>
-                  </n-step>
-                  <n-step title="安装插件" status="finish">
-                    <template #description>
-                      <n-text code>npm install weclawbot-agent-plugin</n-text>
-                    </template>
-                  </n-step>
-                  <n-step title="编写 Agent" status="finish">
-                    <template #description>
-                      <n-text depth="3" style="font-size: 13px">
-                        import { WeClawBotAgent } from 'weclawbot-agent-plugin'<br>
-                        const agent = new WeClawBotAgent({ bridgeUrl, agentId, token })<br>
-                        agent.onMessage(async (msg) =&gt; { return { text: await yourAI(msg.text) } })<br>
-                        agent.connect()
-                      </n-text>
-                    </template>
-                  </n-step>
-                </n-steps>
+                <n-ol style="margin-top: 12px">
+                  <n-li>
+                    <n-text strong>添加 Agent</n-text> — 类型选 <n-text code>WS Remote (插件接入)</n-text>，填写命令和名称，点击「生成 Token」。
+                  </n-li>
+                  <n-li>
+                    <n-text strong>安装插件</n-text> — <n-text code>npm install weclawbot-agent-plugin</n-text>
+                  </n-li>
+                  <n-li>
+                    <n-text strong>编写 Agent</n-text>：
+                    <n-text depth="3" style="font-size: 13px; display: block; margin-top: 4px">
+                      import { WeClawBotAgent } from 'weclawbot-agent-plugin'<br>
+                      const agent = new WeClawBotAgent({ bridgeUrl, agentId, token })<br>
+                      agent.onMessage(async (msg) =&gt; { return { text: await yourAI(msg.text) } })<br>
+                      agent.connect()
+                    </n-text>
+                  </n-li>
+                </n-ol>
                 <n-text depth="3" style="display: block; margin-top: 8px">
                   插件自动处理重连、心跳、认证。Agent 离线时消息会提示"不在线"而非丢失。
                 </n-text>
