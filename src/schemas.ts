@@ -26,7 +26,7 @@ export const AgentConfigSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   command: z.string().min(1),
-  type: z.enum(['cli', 'http', 'ws']),
+  type: z.enum(['cli', 'http', 'ws', 'ws-remote']),
   description: z.string(),
   endpoint: z.string().optional(),
   timeout: z.number().int().positive().max(300000),

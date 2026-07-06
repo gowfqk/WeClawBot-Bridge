@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     ApiMethod: typeof import('./components/ApiMethod.vue')['default']
     ApiParams: typeof import('./components/ApiParams.vue')['default']
+    NAlert: typeof import('naive-ui')['NAlert']
     NButton: typeof import('naive-ui')['NButton']
     NCard: typeof import('naive-ui')['NCard']
     NConfigProvider: typeof import('naive-ui')['NConfigProvider']

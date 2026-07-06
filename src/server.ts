@@ -7,6 +7,7 @@ import type { CommandHandler } from './command-handler'
 import type { NotificationService } from './notification'
 import type { SessionManager } from './session-manager'
 import type { AppConfig } from './config'
+import type { WsAgentServer } from './ws-agent-server'
 import { saveAgents } from './config'
 import type { Storage } from './types'
 import { API_KEY_STORAGE_KEY } from './types'
@@ -34,6 +35,7 @@ export function createServer(
   storage: Storage,
   sessionManager: SessionManager,
   logger: Logger,
+  wsAgentServer?: WsAgentServer,
 ) {
   const app = express()
 
@@ -585,6 +587,26 @@ export function createServer(
       const error = err as Error
       res.status(500).json({ error: error.message })
     }
+  })
+
+  // ===== WS Agent 状态 API =====
+  app.get('/api/ws-agents', dynamicAuth, (_req, res) => {
+    if (!wsAgentServer) {
+      res.json({ agents: [], message: 'WS Agent Server 未启用' })
+      return
+    }
+    const agents = wsAgentServer.getOnlineAgents()
+    res.json({ agents, count: agents.length })
+  })
+
+  app.post('/api/ws-agents/:id/token', dynamicAuth, (req, res) => {
+    if (!wsAgentServer) {
+      res.status(503).json({ error: 'WS Agent Server 未启用' })
+      return
+    }
+    const agentId = req.params.id as string
+    const token = wsAgentServer.generateToken(agentId)
+    res.json({ agentId, token })
   })
 
   app.post('/api/notify', dynamicAuth, async (req, res) => {

@@ -1,6 +1,7 @@
 import type { AgentConfig, AgentPayload, AgentResponse } from './types'
 import { CliAgentAdapter } from './cli-agent'
 import { WsAgentChannel, type WsChannelStatus } from './ws-agent-channel'
+import type { WsAgentServer } from './ws-agent-server'
 import { createLogger } from './logger'
 
 const log = createLogger('agent-registry')
@@ -14,11 +15,17 @@ export class AgentRegistry {
   private commandIndex: Map<string, string> = new Map()
   private cliAdapter: CliAgentAdapter
   private wsChannels: Map<string, WsAgentChannel> = new Map()
+  private wsAgentServer: WsAgentServer | null = null
   private defaultFallbackText: string
 
   constructor(defaultFallbackText?: string) {
     this.defaultFallbackText = defaultFallbackText || '服务繁忙，请稍后再试。'
     this.cliAdapter = new CliAgentAdapter()
+  }
+
+  /** 注入 WS Agent Server（由 index.ts 调用） */
+  setWsAgentServer(server: WsAgentServer): void {
+    this.wsAgentServer = server
   }
 
   register(config: AgentConfig): void {
@@ -70,6 +77,10 @@ export class AgentRegistry {
 
     if (agent.type === 'ws') {
       return this.invokeWs(agentId, payload)
+    }
+
+    if (agent.type === 'ws-remote') {
+      return this.invokeWsRemote(agentId, payload)
     }
 
     return this.invokeHttp(agent, payload)
@@ -524,6 +535,28 @@ export class AgentRegistry {
         return { reply: { text: `Agent 响应超时，请稍后再试。` } }
       }
       log.error({ agentId, err: error.message }, 'WS Agent 调用失败')
+      return { reply: { text: 'Agent 调用失败，请稍后再试。' } }
+    }
+  }
+
+  /** WS-Remote 通道：通过 WsAgentServer 路由到远程 Agent */
+  private async invokeWsRemote(agentId: string, payload: AgentPayload): Promise<AgentResponse> {
+    if (!this.wsAgentServer) {
+      return { reply: { text: 'WS Agent Server 未初始化。' } }
+    }
+
+    if (!this.wsAgentServer.isOnline(agentId)) {
+      return { reply: { text: `Agent "${agentId}" 不在线，请稍后再试。` } }
+    }
+
+    try {
+      return await this.wsAgentServer.invoke(agentId, payload)
+    } catch (err) {
+      const error = err as Error
+      if (error.message.includes('超时')) {
+        return { reply: { text: 'Agent 响应超时，请稍后再试。' } }
+      }
+      log.error({ agentId, err: error.message }, 'WS-Remote Agent 调用失败')
       return { reply: { text: 'Agent 调用失败，请稍后再试。' } }
     }
   }

@@ -1,4 +1,4 @@
-export type AgentType = 'http' | 'cli' | 'ws'
+export type AgentType = 'http' | 'cli' | 'ws' | 'ws-remote'
 
 export interface AgentConfig {
   id: string

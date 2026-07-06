@@ -42,6 +42,21 @@
           </n-form-item>
         </template>
 
+        <!-- WS Remote 字段（插件接入） -->
+        <template v-if="form.type === 'ws-remote'">
+          <n-grid :cols="2" :x-gap="16">
+            <n-form-item-gi label="Agent Token" path="apiKey">
+              <n-input v-model:value="form.apiKey" type="password" show-password-on="click" placeholder="插件连接用 Token（管理面板生成）" />
+            </n-form-item-gi>
+            <n-form-item-gi label="超时 (ms)" path="timeout">
+              <n-input-number v-model:value="form.timeout" :min="5000" :step="5000" style="width: 100%" />
+            </n-form-item-gi>
+          </n-grid>
+          <n-alert type="info" style="margin-bottom: 12px">
+            WS Remote 类型：Agent 通过插件主动连接 Bridge，无需起 HTTP 服务。在管理面板生成 Token，Agent 端使用 weclawbot-agent-plugin 连接。
+          </n-alert>
+        </template>
+
         <!-- WS 字段 -->
         <template v-if="form.type === 'ws'">
           <n-grid :cols="2" :x-gap="16">
@@ -148,7 +163,7 @@ interface Agent {
   id: string
   name: string
   command: string
-  type: 'http' | 'cli' | 'ws'
+  type: 'http' | 'cli' | 'ws' | 'ws-remote'
   description: string
   endpoint?: string
   timeout: number
@@ -201,6 +216,7 @@ const cliArgsText = ref('')
 const typeOptions = [
   { label: 'HTTP', value: 'http' },
   { label: 'WebSocket', value: 'ws' },
+  { label: 'WS Remote (插件接入)', value: 'ws-remote' },
   { label: 'CLI', value: 'cli' },
 ]
 const formatOptions = [

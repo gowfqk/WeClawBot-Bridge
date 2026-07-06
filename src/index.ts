@@ -11,6 +11,7 @@ import { createMessageHandler } from './message-handler'
 import { createServer } from './server'
 import { botStatus } from './metrics'
 import { logger } from './logger'
+import { WsAgentServer } from './ws-agent-server'
 
 async function main(): Promise<void> {
   const config = loadConfig()
@@ -79,6 +80,43 @@ async function main(): Promise<void> {
 
   botManager.onMessage(messageHandler)
 
+  // ===== WS Agent Server：接受 Agent 主动接入 =====
+  const wsAgentServer = new WsAgentServer({
+    onAgentConnect: (agentId, info) => {
+      logger.info({ agentId, name: info.name, command: info.command }, 'WS Agent 已上线')
+      // 动态注册为 ws-remote 类型 Agent
+      agentRegistry.register({
+        id: agentId,
+        name: info.name,
+        command: info.command,
+        type: 'ws-remote',
+        description: info.description || `WebSocket 远程 Agent (${info.name})`,
+        timeout: 60000,
+        model: info.model,
+      })
+      commandHandler.updateAgents(agentRegistry.listAll())
+    },
+    onAgentDisconnect: (agentId) => {
+      logger.info({ agentId }, 'WS Agent 已离线')
+      // Agent 离线时从 registry 移除，避免路由到不在线的 Agent
+      agentRegistry.unregister(agentId)
+      commandHandler.updateAgents(agentRegistry.listAll())
+    },
+    onAgentPush: (agentId, text, userId) => {
+      logger.info({ agentId, userId, text: text.slice(0, 50) }, 'WS Agent 主动推送消息')
+      // TODO: 可通过 botManager 主动发消息给微信用户
+    },
+  })
+
+  // 为已配置的 ws-remote Agent 设置 token
+  for (const agent of config.agents) {
+    if (agent.type === 'ws-remote' && agent.apiKey) {
+      wsAgentServer.setAgentToken(agent.id, agent.apiKey)
+    }
+  }
+
+  agentRegistry.setWsAgentServer(wsAgentServer)
+
   const app = createServer(
     config,
     botManager,
@@ -88,9 +126,13 @@ async function main(): Promise<void> {
     rawStorage,
     sessionManager,
     logger,
+    wsAgentServer,
   )
 
   const server = http.createServer(app)
+
+  // 挂载 WS Agent Server 到 HTTP server
+  wsAgentServer.attach(server)
 
   server.listen(config.port, () => {
     logger.info({ port: config.port }, 'Gateway server listening')
@@ -113,6 +155,7 @@ async function main(): Promise<void> {
     logger.info('Shutting down...')
     notificationService.stopScheduler()
     agentRegistry.closeAllCliSessions()
+    wsAgentServer.close()
     // 清理 rate-limit 定时器，防止内存泄漏
     const appWithDestroy = app as unknown as Record<string, unknown>
     if (typeof appWithDestroy.destroy === 'function') {
