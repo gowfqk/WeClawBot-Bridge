@@ -28,6 +28,11 @@ COPY --from=frontend-build /app/public/ ./public/
 # 清理源码和开发依赖，仅保留运行时
 RUN rm -rf src/ tsconfig.json && npm ci --omit=dev
 
+# 创建非 root 用户运行应用
+RUN addgroup -S app && adduser -S app -G app && \
+    chown -R app:app /app
+USER app
+
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

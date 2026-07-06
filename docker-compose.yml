@@ -14,6 +14,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - SESSION_MAX_ROUNDS=${SESSION_MAX_ROUNDS:-0}
       - SESSION_EXPIRE_MS=${SESSION_EXPIRE_MS:-0}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
 
 volumes:
   gate-storage:

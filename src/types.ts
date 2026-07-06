@@ -16,6 +16,8 @@ export interface AgentConfig {
   format?: 'native' | 'openai' | 'qwenpaw'
   streaming?: boolean
   responsePath?: string
+  systemPrompt?: string
+  maxHistory?: number
   cliCommand?: string
   cliArgs?: string[]
   cliWorkDir?: string

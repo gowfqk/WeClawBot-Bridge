@@ -23,6 +23,11 @@ async function main(): Promise<void> {
     ? new EncryptedStorage(rawStorage, config.encryptionKey)
     : rawStorage
 
+  if (!config.encryptionKey) {
+    logger.warn('⚠️  ENCRYPTION_KEY 未设置！敏感数据（微信凭证、API Key）将以明文存储。强烈建议设置 ENCRYPTION_KEY 环境变量。')
+    logger.warn('   生成方法：node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"')
+  }
+
   const userState = new UserStateManager(rawStorage, config.defaultAgentId)
 
   const commandHandler = new CommandHandler()
@@ -108,6 +113,11 @@ async function main(): Promise<void> {
     logger.info('Shutting down...')
     notificationService.stopScheduler()
     agentRegistry.closeAllCliSessions()
+    // 清理 rate-limit 定时器，防止内存泄漏
+    const appWithDestroy = app as unknown as Record<string, unknown>
+    if (typeof appWithDestroy.destroy === 'function') {
+      (appWithDestroy.destroy as () => void)()
+    }
     await botManager.stop()
 
     // 优雅关闭：停止接受新连接，等待现有请求完成

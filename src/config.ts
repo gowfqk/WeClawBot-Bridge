@@ -2,27 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import type { AgentConfig } from './types'
-
-const AgentConfigSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  command: z.string().min(1),
-  type: z.enum(['http', 'cli']).default('http'),
-  description: z.string(),
-  endpoint: z.string().optional(),
-  timeout: z.number().int().positive().default(30000),
-  headers: z.record(z.string(), z.string()).optional(),
-  apiKey: z.string().optional(),
-  model: z.string().optional(),
-  format: z.enum(['native', 'openai', 'qwenpaw']).optional(),
-  streaming: z.boolean().optional(),
-  responsePath: z.string().optional(),
-  cliCommand: z.string().optional(),
-  cliArgs: z.array(z.string()).optional(),
-  cliWorkDir: z.string().optional(),
-  cliMode: z.enum(['oneshot', 'persistent']).optional(),
-  cliSentinel: z.string().optional(),
-})
+import { AgentConfigSchema } from './schemas'
 
 const AgentsFileSchema = z.object({
   agents: z.array(AgentConfigSchema),
@@ -78,6 +58,14 @@ export function loadConfig(configPath?: string): AppConfig {
   if (fs.existsSync(agentsPath)) {
     try {
       const raw = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'))
+      // 兼容旧版配置：补全缺失的默认值
+      if (raw.agents && Array.isArray(raw.agents)) {
+        for (const agent of raw.agents) {
+          if (!agent.type) agent.type = 'http'
+          if (!agent.timeout) agent.timeout = 30000
+          if (!agent.description) agent.description = agent.name || ''
+        }
+      }
       const parsed = AgentsFileSchema.parse(raw)
       agents = parsed.agents
       defaultAgentId = parsed.defaultAgentId
@@ -105,6 +93,12 @@ export function loadConfig(configPath?: string): AppConfig {
 export async function loadAgentsFromStorage(storage: { get: <T>(key: string) => Promise<T | undefined> }): Promise<void> {
   const data = await storage.get<{ agents: AgentConfig[]; defaultAgentId?: string }>('config:agents')
   if (data && Array.isArray(data.agents) && data.agents.length > 0) {
+    // 兼容旧版配置：补全缺失的默认值
+    for (const agent of data.agents) {
+      if (!agent.type) agent.type = 'http'
+      if (!agent.timeout) agent.timeout = 30000
+      if (!agent.description) agent.description = agent.name || ''
+    }
     const parsed = AgentsFileSchema.safeParse(data)
     if (parsed.success) {
       if (cachedConfig) {

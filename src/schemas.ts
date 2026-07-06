@@ -7,13 +7,13 @@ export const LoginSchema = z.object({
 
 /** 初始设置密码 */
 export const SetupSchema = z.object({
-  password: z.string().min(4, '密码至少4位'),
+  password: z.string().min(8, '密码至少8位'),
 })
 
 /** 修改密码 */
 export const ChangePasswordSchema = z.object({
   oldPassword: z.string().min(1, '请输入当前密码'),
-  newPassword: z.string().min(4, '新密码至少4位'),
+  newPassword: z.string().min(8, '新密码至少8位'),
 })
 
 /** 配置更新 */
@@ -21,7 +21,7 @@ export const ConfigSchema = z.object({
   apiKey: z.string().optional(),
 })
 
-/** Agent 配置 */
+/** Agent 配置 — 与 types.AgentConfig 保持同步 */
 export const AgentConfigSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -29,15 +29,21 @@ export const AgentConfigSchema = z.object({
   type: z.enum(['cli', 'http']),
   description: z.string(),
   endpoint: z.string().optional(),
+  timeout: z.number().int().positive().max(300000),
+  headers: z.record(z.string(), z.string()).optional(),
+  cliEnv: z.record(z.string(), z.string()).optional(),
   apiKey: z.string().optional(),
   model: z.string().optional(),
   format: z.enum(['native', 'openai', 'qwenpaw']).optional(),
   streaming: z.boolean().optional(),
-  timeout: z.number().int().positive().max(300000),
-  headers: z.record(z.string(), z.string()).optional(),
-  cliEnv: z.record(z.string(), z.string()).optional(),
+  responsePath: z.string().optional(),
   systemPrompt: z.string().optional(),
   maxHistory: z.number().int().positive().max(100).optional(),
+  cliCommand: z.string().optional(),
+  cliArgs: z.array(z.string()).optional(),
+  cliWorkDir: z.string().optional(),
+  cliMode: z.enum(['oneshot', 'persistent']).optional(),
+  cliSentinel: z.string().optional(),
 })
 
 /** 通知发送 */

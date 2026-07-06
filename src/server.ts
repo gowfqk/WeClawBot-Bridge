@@ -1,5 +1,6 @@
 import express from 'express'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import type { BotManager } from './bot-manager'
 import type { AgentRegistry } from './agent-registry'
 import type { CommandHandler } from './command-handler'
@@ -22,6 +23,7 @@ import {
 } from './schemas'
 import cors from 'cors'
 import helmet from 'helmet'
+import cookieParser from 'cookie-parser'
 
 export function createServer(
   config: AppConfig,
@@ -35,6 +37,10 @@ export function createServer(
 ) {
   const app = express()
 
+  // 信任反向代理（Nginx/Cloudflare 等），使 req.ip 反映真实客户端 IP
+  // 设为 1 表示信任第一层代理，设为 true 信任所有代理（不推荐生产环境）
+  app.set('trust proxy', 1)
+
   // 自定义 CSP 配置，允许管理界面必要的资源
   app.use(helmet({
     contentSecurityPolicy: {
@@ -42,28 +48,40 @@ export function createServer(
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "https://static.cloudflareinsights.com"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "https://api.qrserver.com"],
-        connectSrc: ["'self'", "http://localhost:*", "https://*.replit.dev", "https://*.replit.app"],
+        imgSrc: ["'self'", "data:"],
+        connectSrc: ["'self'", "https://static.cloudflareinsights.com"],
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         formAction: ["'self'"],
-        frameAncestors: ["'none'"]
+        frameAncestors: ["'none'"],
+        upgradeInsecureRequests: [],
       }
-    }
+    },
+    crossOriginOpenerPolicy: false,  // 隧道/反代场景下放宽
+    crossOriginResourcePolicy: false, // 隧道/反代场景下放宽
   }))
   
+  // CORS 配置：仅在显式设置 ALLOWED_ORIGINS 时允许跨域
+  // 未设置时默认同源策略（origin 不匹配的请求仍可到达，但浏览器会阻止读取响应）
+  const corsOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
+    : false  // false = 仅允许同源请求
   app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || true,
+    origin: corsOrigins,
     credentials: true
   }))
   
+  app.use(cookieParser())
   app.use(express.json({ limit: '1mb' }))
   app.use(loggingMiddleware(logger))
-  app.use(rateLimitMiddleware())
+  const rateLimiter = rateLimitMiddleware()
+  app.use(rateLimiter)
 
   // CSRF 保护：验证浏览器请求的 Origin/Referer 头
-  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim().replace(/\/$/, ''))
+  const allowedOrigins = corsOrigins === false
+    ? undefined
+    : (corsOrigins as string[]).map(o => o.replace(/\/$/, ''))
   app.use('/api', csrfOriginMiddleware(allowedOrigins))
 
   app.use(express.static(path.resolve(__dirname, '../public')))
@@ -72,20 +90,10 @@ export function createServer(
     res.redirect('/')
   })
 
-  // SPA fallback: 所有非 API、非静态文件路由返回 index.html
-  app.get('*', (_req, res, next) => {
-    // 仅对非 API 路径且 Accept HTML 的请求返回 SPA 入口
-    if (_req.path.startsWith('/api') || !_req.accepts('html')) {
-      next()
-      return
-    }
-    res.sendFile(path.resolve(__dirname, '../public/index.html'))
-  })
-
   // ===== 会话认证系统 =====
   const sessionAuth = new SessionAuth(storage, config.apiKey)
 
-  // 认证中间件：验证 Bearer Token（会话令牌，非密码）
+  // 认证中间件：验证 Bearer Token 或 HttpOnly Cookie（会话令牌，非密码）
   const dynamicAuth = async (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction): Promise<void> => {
     const passwordSet = await sessionAuth.isPasswordSet()
     if (!passwordSet) {
@@ -93,14 +101,19 @@ export function createServer(
       next()
       return
     }
+    // 优先从 HttpOnly Cookie 读取，其次从 Authorization header 读取
+    const cookieToken = req.cookies?.[COOKIE_NAME]
     const authHeader = req.headers.authorization
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
+    const token = cookieToken || headerToken
+
+    if (!token) {
       res.status(401).json({ error: 'Unauthorized' })
       return
     }
-    const token = authHeader.slice(7)
     const result = sessionAuth.validateToken(token)
     if (!result.valid) {
+      clearAuthCookie(res)
       if (result.expired) {
         res.status(401).json({ error: 'Token expired', code: 'TOKEN_EXPIRED' })
       } else {
@@ -130,9 +143,6 @@ export function createServer(
   .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
   .online { background: #d4edda; color: #155724; }
   .offline { background: #f8d7da; color: #721c24; }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
-  th { color: #888; font-weight: 500; }
 </style>
 </head>
 <body>
@@ -142,36 +152,34 @@ export function createServer(
 <div class="card">
   <h3>Bot 状态</h3>
   <p>在线状态：<span class="badge ${status.loggedIn ? 'online' : 'offline'}">${status.loggedIn ? '在线' : '离线'}</span></p>
-  ${status.accountId ? `<p>账号：${status.accountId}</p>` : status.qrUrl ? `
-    <p style="margin-top:12px">请使用微信扫描二维码登录：</p>
-    <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(status.qrUrl)}" alt="微信登录二维码" style="border:1px solid #ddd;border-radius:8px;margin-top:8px">
-    <p style="font-size:12px;color:#999;margin-top:8px">二维码过期后可通过 <code>POST /api/bot/login</code> 刷新</p>
-  ` : '<p>正在获取二维码...</p>'}
 </div>
 <div class="card">
   <h3>已注册 Agent（${agents.length} 个）</h3>
-  <table>
-    <tr><th>命令</th><th>名称</th><th>类型</th><th>描述</th></tr>
-    ${agents.map(a => `<tr><td><code>/${a.command}</code></td><td>${a.name}</td><td style="font-size:12px">${a.type === 'cli' ? 'CLI' : 'HTTP'}</td><td style="color:#888">${a.description}</td></tr>`).join('')}
-  </table>
-</div>
-<div class="card">
-  <h3>API 端点</h3>
-  <table>
-    <tr><td>健康检查</td><td><code>GET /api/health</code></td></tr>
-    <tr><td>Prometheus 指标</td><td><code>GET /api/metrics</code></td></tr>
-    <tr><td>Bot 登录</td><td><code>POST /api/bot/login</code></td></tr>
-    <tr><td>Agent 管理</td><td><code>GET/POST/DELETE /api/agents</code></td></tr>
-    <tr><td>发送通知</td><td><code>POST /api/notify</code></td></tr>
-    <tr><td>通知规则</td><td><code>POST/DELETE /api/notify/rules</code></td></tr>
-  </table>
+  <p>请登录管理面板查看详情</p>
 </div>
 </body>
 </html>`)
   })
 
+  // 设置认证 cookie 的辅助函数
+  const COOKIE_NAME = 'wcbot_session'
+  const setAuthCookie = (res: import('express').Response, token: string, expiresAt: number): void => {
+    const maxAge = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000))
+    res.cookie(COOKIE_NAME, token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge,
+      path: '/',
+    })
+  }
+
+  const clearAuthCookie = (res: import('express').Response): void => {
+    res.clearCookie(COOKIE_NAME, { path: '/' })
+  }
+
   // ===== 认证 API =====
-  app.post('/api/auth/login', async (req, res) => {
+  app.post('/api/auth/login', rateLimitMiddleware(5, 60_000), async (req, res) => {
     const v = validate(LoginSchema, req.body)
     if (!v.ok) { res.status(400).json({ error: v.error }); return }
     const { password } = v.data
@@ -194,12 +202,15 @@ export function createServer(
       return
     }
 
-    res.json({ authenticated: true, token: session.token, expiresAt: session.expiresAt })
+    setAuthCookie(res, session.token, session.expiresAt)
+    res.json({ authenticated: true, expiresAt: session.expiresAt })
   })
 
   app.get('/api/auth/status', async (req, res) => {
+    const cookieToken = req.cookies?.[COOKIE_NAME]
     const authHeader = req.headers.authorization
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
+    const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
+    const token = cookieToken || headerToken
 
     const passwordSet = await sessionAuth.isPasswordSet()
     if (!passwordSet) {
@@ -217,7 +228,7 @@ export function createServer(
     res.json({ authenticated: result.valid, passwordSet: true })
   })
 
-  app.post('/api/auth/setup', async (req, res) => {
+  app.post('/api/auth/setup', rateLimitMiddleware(3, 60_000), async (req, res) => {
     // 首次设置密码（仅在未设置时允许）
     const passwordSet = await sessionAuth.isPasswordSet()
     if (passwordSet) {
@@ -233,7 +244,8 @@ export function createServer(
 
     // 设置密码后自动登录，返回会话 Token
     const session = await sessionAuth.login(password)
-    res.json({ ok: true, token: session!.token, expiresAt: session!.expiresAt })
+    setAuthCookie(res, session!.token, session!.expiresAt)
+    res.json({ ok: true, expiresAt: session!.expiresAt })
   })
 
   app.post('/api/auth/change-password', dynamicAuth, async (req, res) => {
@@ -249,12 +261,17 @@ export function createServer(
 
     // 密码修改成功后自动重新登录
     const session = await sessionAuth.login(newPassword)
-    res.json({ ok: true, token: session!.token, expiresAt: session!.expiresAt })
+    setAuthCookie(res, session!.token, session!.expiresAt)
+    res.json({ ok: true, expiresAt: session!.expiresAt })
   })
 
   app.post('/api/auth/logout', dynamicAuth, (req, res) => {
-    const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : ''
+    const cookieToken = req.cookies?.[COOKIE_NAME]
+    const authHeader = req.headers.authorization
+    const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : ''
+    const token = cookieToken || headerToken
     sessionAuth.logout(token)
+    clearAuthCookie(res)
     res.json({ ok: true })
   })
 
@@ -283,12 +300,12 @@ export function createServer(
       }
       res.json({ qrUrl, status: 'waiting_for_scan' })
     } catch (err) {
-      const error = err as Error
-      res.status(500).json({ error: error.message })
+      logger.error({ err: (err as Error).message }, 'Bot login error')
+      res.status(500).json({ error: 'Bot 登录失败，请重试' })
     }
   })
 
-  app.get('/api/bot/status', (_req, res) => {
+  app.get('/api/bot/status', dynamicAuth, (_req, res) => {
     res.json(botManager.getStatus())
   })
 
@@ -328,6 +345,8 @@ export function createServer(
       const allKeys = await storage.listKeys()
       const storageDump: Record<string, unknown> = {}
       for (const key of allKeys) {
+        // 跳过旧版明文密钥存储键（仅保留 bcrypt 哈希）
+        if (key === 'config:api_key') continue
         const val = await storage.get(key)
         if (val !== undefined) storageDump[key] = val
       }
@@ -351,7 +370,7 @@ export function createServer(
       const backup = {
         version: 2,
         exportedAt: new Date().toISOString(),
-        agents,
+        agents, // 导出完整 Agent 配置（含 apiKey），用于迁移恢复
         defaultAgentId: config.defaultAgentId,
         session: sessionConfig,
         notifications: notifyRules,
@@ -401,7 +420,7 @@ export function createServer(
         await sessionManager.updateConfig(backup.session.maxRounds, backup.session.expireMs)
       }
 
-      // 导入 API Key（可选，使用 bcrypt 哈希存储）
+      // 恢复管理密码：如果备份中包含 apiKey 明文，通过 bcrypt 重新哈希存储
       if (backup.apiKey) {
         await sessionAuth.setPassword(backup.apiKey)
       }
@@ -414,9 +433,20 @@ export function createServer(
       }
 
       // v2 新增：导入全部存储数据（会话、通知日志、上下文令牌等）
+      // 安全限制：禁止覆盖旧版明文密钥和微信上下文令牌
+      const BLOCKED_IMPORT_KEYS = new Set([
+        'config:api_key', 'config:default_recipient',
+      ])
+      const isBlockedKey = (key: string) =>
+        BLOCKED_IMPORT_KEYS.has(key) || key.startsWith('context_token:')
+
       let storageCount = 0
       if (backup.storageDump && Object.keys(backup.storageDump).length > 0) {
         for (const [key, value] of Object.entries(backup.storageDump)) {
+          if (isBlockedKey(key)) {
+            logger.warn({ key }, 'Import skipped blocked storage key')
+            continue
+          }
           await storage.set(key, value)
           storageCount++
         }
@@ -455,8 +485,9 @@ export function createServer(
     }
   })
 
-  app.get('/api/agents', (_req, res) => {
-    res.json(agentRegistry.listAll())
+  app.get('/api/agents', dynamicAuth, (_req, res) => {
+    const agents = agentRegistry.listAll()
+    res.json(agents)
   })
 
   app.post('/api/agents', dynamicAuth, async (req, res) => {
@@ -538,14 +569,14 @@ export function createServer(
     }
     try {
       const start = Date.now()
-      const session = await sessionManager.getOrCreate('admin-test', agentId)
+      // 使用临时会话进行测试，不持久化到存储
+      const tempSession = await sessionManager.getOrCreate('admin-test', agentId)
       const response = await agentRegistry.invoke(agentId, {
         message: { text, type: 'text' },
-        session: { userId: 'admin-test', agentId, history: session.history },
+        session: { userId: 'admin-test', agentId, history: tempSession.history },
       })
-      // 持久化测试消息
-      sessionManager.append('admin-test', agentId, { role: 'user', content: text, timestamp: Date.now() })
-      sessionManager.append('admin-test', agentId, { role: 'assistant', content: response.reply.text, timestamp: Date.now() })
+      // 测试后清理临时会话，避免污染会话列表
+      await sessionManager.clear('admin-test', agentId)
       res.json({
         text: response.reply.text,
         elapsed: Date.now() - start,
@@ -601,7 +632,33 @@ export function createServer(
     res.json(logs)
   })
 
-  app.post('/api/webhook', async (req, res) => {
+  // ===== Webhook 认证 =====
+  // 支持两种方式：
+  // 1. Bearer Token（与管理面板相同的会话认证）
+  // 2. X-Webhook-Secret（专用的 Webhook 密钥，适合 CI/CD 等外部调用）
+  const webhookSecret = process.env.WEBHOOK_SECRET
+  const webhookAuth = async (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction): Promise<void> => {
+    // 如果配置了 WEBHOOK_SECRET，则要求验证（使用时序安全比较防止计时攻击）
+    if (webhookSecret) {
+      const provided = req.headers['x-webhook-secret'] as string | undefined
+      if (!provided) {
+        res.status(401).json({ error: 'Invalid webhook secret' })
+        return
+      }
+      const a = Buffer.from(provided, 'utf-8')
+      const b = Buffer.from(webhookSecret, 'utf-8')
+      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        res.status(401).json({ error: 'Invalid webhook secret' })
+        return
+      }
+      next()
+      return
+    }
+    // 未配置 WEBHOOK_SECRET 时，回退到 Bearer Token 认证
+    await dynamicAuth(req, res, next)
+  }
+
+  app.post('/api/webhook', webhookAuth, async (req, res) => {
     try {
       const { userId, text, content } = req.body
 
@@ -693,6 +750,22 @@ export function createServer(
       res.status(500).json({ error: error.message })
     }
   })
+
+  // SPA fallback: 所有非 API、非静态文件路由返回 index.html
+  // 必须放在所有 API 路由之后，否则会拦截后续注册的路由
+  app.get('*', (_req, res, next) => {
+    // 仅对非 API 路径且 Accept HTML 的请求返回 SPA 入口
+    if (_req.path.startsWith('/api') || !_req.accepts('html')) {
+      next()
+      return
+    }
+    res.sendFile(path.resolve(__dirname, '../public/index.html'))
+  })
+
+  // 挂载清理函数，供 shutdown 时调用
+  ;(app as unknown as Record<string, unknown>).destroy = (): void => {
+    rateLimiter.destroy()
+  }
 
   return app
 }

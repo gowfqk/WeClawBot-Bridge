@@ -27,7 +27,7 @@
             v-model:value="setupForm.password"
             type="password"
             show-password-on="click"
-            placeholder="至少4位字符"
+            placeholder="至少8位字符"
           />
         </n-form-item>
         <n-form-item path="password2" label="确认密码">
@@ -76,7 +76,7 @@ const loginRules: FormRules = {
 const setupRules: FormRules = {
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 4, message: '密码至少4位', trigger: 'blur' },
+    { min: 8, message: '密码至少8位', trigger: 'blur' },
   ],
   password2: [
     { required: true, message: '请确认密码', trigger: 'blur' },

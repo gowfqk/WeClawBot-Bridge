@@ -31,6 +31,7 @@ jobs:
         run: |
           curl -s -X POST ${{ secrets.WECLAW_WEBHOOK_URL }} \
             -H "Content-Type: application/json" \
+            -H "X-Webhook-Secret: ${{ secrets.WECLAW_WEBHOOK_SECRET }}" \
             -d "{\"content\":{\"text\":\"✅ [${{ github.repository }}] CI 通过\\n分支：${{ github.ref_name }}\\n提交：${{ github.sha }}\"}}"
 
       - name: 通知失败
@@ -38,4 +39,5 @@ jobs:
         run: |
           curl -s -X POST ${{ secrets.WECLAW_WEBHOOK_URL }} \
             -H "Content-Type: application/json" \
+            -H "X-Webhook-Secret: ${{ secrets.WECLAW_WEBHOOK_SECRET }}" \
             -d "{\"content\":{\"text\":\"❌ [${{ github.repository }}] CI 失败\\n分支：${{ github.ref_name }}\\n提交：${{ github.sha }}\\n请检查 Actions 日志\"}}"

@@ -82,7 +82,11 @@ export class SessionAuth {
           oldest = token
         }
       }
-      if (oldest) this.sessions.delete(oldest)
+      if (oldest) {
+        const evicted = this.sessions.get(oldest)!
+        console.warn(`[SessionAuth] 会话被踢出：达到最大并发数 (${MAX_SESSIONS})，最早会话 (创建于 ${new Date(evicted.createdAt).toISOString()}) 已被移除。如有疑问请检查是否存在异常登录。`)
+        this.sessions.delete(oldest)
+      }
     }
 
     const token = crypto.randomUUID()

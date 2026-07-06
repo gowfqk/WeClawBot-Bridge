@@ -1,38 +1,32 @@
 /** 统一 API 请求封装 */
 
-let authToken = ''
+// Token 现在通过 HttpOnly Cookie 自动携带，不再存储在 localStorage
+// 仅保留 tokenExpiresAt 用于前端判断是否过期（跳转登录页）
+
 let tokenExpiresAt = 0
 
-export function setToken(token: string, expiresAt?: number) {
-  authToken = token
+export function setToken(_token: string, expiresAt?: number) {
+  // Token 由服务端通过 HttpOnly Cookie 设置，前端无需手动存储
   tokenExpiresAt = expiresAt || 0
-  localStorage.setItem('auth_token', token)
   if (expiresAt) localStorage.setItem('auth_expires', String(expiresAt))
 }
 
 export function clearToken() {
-  authToken = ''
   tokenExpiresAt = 0
-  localStorage.removeItem('auth_token')
   localStorage.removeItem('auth_expires')
 }
 
-export function getToken(): string {
-  if (!authToken) {
-    authToken = localStorage.getItem('auth_token') || ''
+export function isTokenExpired(): boolean {
+  if (!tokenExpiresAt) {
     tokenExpiresAt = Number(localStorage.getItem('auth_expires') || 0)
   }
-  // 检查是否过期
-  if (tokenExpiresAt && Date.now() > tokenExpiresAt) {
-    clearToken()
-    return ''
-  }
-  return authToken
+  return tokenExpiresAt > 0 && Date.now() > tokenExpiresAt
 }
 
 export function authHeaders(): Record<string, string> {
-  const token = getToken()
-  return token ? { Authorization: `Bearer ${token}` } : {}
+  // Cookie 由浏览器自动携带，此处仅用于非浏览器客户端（curl 等）的 Bearer Token 回退
+  // 浏览器环境下不设置 Authorization header，让 cookie 生效
+  return {}
 }
 
 /** 处理 401/403 认证错误 */
@@ -61,7 +55,8 @@ export async function request<T = unknown>(
     ...(options.headers as Record<string, string> || {}),
   }
 
-  const res = await fetch(url, { ...options, headers })
+  // credentials: 'same-origin' 确保同源请求携带 HttpOnly Cookie
+  const res = await fetch(url, { ...options, headers, credentials: 'same-origin' })
 
   if (res.status === 401 || res.status === 403) {
     const data = await res.json().catch(() => ({}))
@@ -94,7 +89,7 @@ export const api = {
 
   /** 下载文件（返回 blob） */
   download: async (url: string) => {
-    const res = await fetch(url, { headers: authHeaders() })
+    const res = await fetch(url, { headers: authHeaders(), credentials: 'same-origin' })
     if (res.status === 401 || res.status === 403) {
       const data = await res.json().catch(() => ({}))
       handleAuthError(res.status, data)
@@ -110,6 +105,7 @@ export const api = {
       method: 'POST',
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
+      credentials: 'same-origin',
     })
     if (res.status === 401 || res.status === 403) {
       const err = await res.json().catch(() => ({}))

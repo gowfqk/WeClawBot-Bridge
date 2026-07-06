@@ -1,7 +1,52 @@
 import { spawn, ChildProcess } from 'node:child_process'
+import path from 'node:path'
 import type { AgentConfig, AgentPayload, AgentResponse } from './types'
+import { createLogger } from './logger'
+
+const log = createLogger('cli-agent')
 
 const DEFAULT_SENTINEL = '__WCBOT_END__'
+
+/** 允许的 CLI 命令白名单（可扩展） */
+const ALLOWED_COMMANDS = new Set([
+  'claude', 'python3', 'python', 'node', 'bash', 'sh', 'git', 'curl', 'make',
+])
+
+/** 验证 CLI 命令是否在白名单中 */
+function validateCliCommand(command: string): string | null {
+  // 提取命令基础名（去除路径前缀）
+  const baseName = path.basename(command)
+  if (ALLOWED_COMMANDS.has(baseName)) return null
+  return `CLI 命令 "${baseName}" 不在允许列表中。允许的命令：${Array.from(ALLOWED_COMMANDS).join(', ')}`
+}
+
+/** 验证工作目录是否在安全范围内 */
+function validateWorkDir(workDir: string): string | null {
+  const resolved = path.resolve(workDir)
+  // 禁止根目录和常见敏感目录
+  const blocked = ['/etc', '/root', '/var', '/usr', '/bin', '/sbin', '/sys', '/proc', '/dev', '/boot']
+  for (const dir of blocked) {
+    if (resolved === dir || resolved.startsWith(dir + '/')) {
+      return `工作目录 "${workDir}" 位于受限路径内，请使用项目目录`
+    }
+  }
+  // 禁止路径穿越
+  if (resolved.includes('..')) {
+    return `工作目录 "${workDir}" 包含路径穿越，请使用绝对路径`
+  }
+  return null
+}
+
+/** 验证 CLI 参数安全性 */
+function validateCliArgs(args: string[]): string | null {
+  for (const arg of args) {
+    // 禁止命令替换和管道
+    if (/[`$]|(\|\|)|(&&)/.test(arg)) {
+      return `CLI 参数包含不安全字符：${arg}`
+    }
+  }
+  return null
+}
 
 interface CliSession {
   process: ChildProcess
@@ -15,6 +60,30 @@ export class CliAgentAdapter {
   private persistentSessions: Map<string, CliSession> = new Map()
 
   async invoke(config: AgentConfig, payload: AgentPayload): Promise<AgentResponse> {
+    // 安全校验：验证 CLI 命令、工作目录和参数
+    const command = config.cliCommand || config.id
+    const cmdError = validateCliCommand(command)
+    if (cmdError) {
+      log.warn({ command, agentId: config.id }, cmdError)
+      return { reply: { text: `安全限制：${cmdError}` } }
+    }
+
+    if (config.cliWorkDir) {
+      const dirError = validateWorkDir(config.cliWorkDir)
+      if (dirError) {
+        log.warn({ workDir: config.cliWorkDir, agentId: config.id }, dirError)
+        return { reply: { text: `安全限制：${dirError}` } }
+      }
+    }
+
+    if (config.cliArgs) {
+      const argsError = validateCliArgs(config.cliArgs)
+      if (argsError) {
+        log.warn({ args: config.cliArgs, agentId: config.id }, argsError)
+        return { reply: { text: `安全限制：${argsError}` } }
+      }
+    }
+
     const mode = config.cliMode || 'oneshot'
     if (mode === 'persistent') {
       return this.invokePersistent(config, payload)
@@ -32,7 +101,7 @@ export class CliAgentAdapter {
         cwd: config.cliWorkDir || process.cwd(),
         stdio: ['pipe', 'pipe', 'pipe'],
         timeout: config.timeout || 30000,
-        env: { ...process.env, ...(config.headers || {}), ...(config.cliEnv || {}) },
+        env: { ...process.env, ...(config.cliEnv || {}) },
       })
 
       let stdout = ''
@@ -105,7 +174,7 @@ export class CliAgentAdapter {
     const child = spawn(command, args, {
       cwd: config.cliWorkDir || process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...(config.headers || {}) },
+      env: { ...process.env, ...(config.cliEnv || {}) },
     })
 
     const session: CliSession = {

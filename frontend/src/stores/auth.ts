@@ -30,12 +30,13 @@ export const useAuthStore = defineStore('auth', () => {
   async function login(password: string) {
     loading.value = true
     try {
-      const res = await api.post<{ authenticated: boolean; token: string; expiresAt?: number }>(
+      const res = await api.post<{ authenticated: boolean; expiresAt?: number }>(
         '/api/auth/login',
         { password },
       )
       if (res.authenticated) {
-        setToken(res.token, res.expiresAt)
+        // Token 由 HttpOnly Cookie 设置，前端只记录过期时间
+        setToken('', res.expiresAt)
         authenticated.value = true
         passwordSet.value = true
       }
@@ -48,11 +49,12 @@ export const useAuthStore = defineStore('auth', () => {
   async function setup(password: string) {
     loading.value = true
     try {
-      const res = await api.post<{ ok: boolean; token: string; expiresAt?: number }>(
+      const res = await api.post<{ ok: boolean; expiresAt?: number }>(
         '/api/auth/setup',
         { password },
       )
-      setToken(res.token, res.expiresAt)
+      // Token 由 HttpOnly Cookie 设置，前端只记录过期时间
+      setToken('', res.expiresAt)
       authenticated.value = true
       passwordSet.value = true
       return res
@@ -62,11 +64,12 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function changePassword(oldPassword: string, newPassword: string) {
-    const res = await api.post<{ ok: boolean; token: string; expiresAt?: number }>(
+    const res = await api.post<{ ok: boolean; expiresAt?: number }>(
       '/api/auth/change-password',
       { oldPassword, newPassword },
     )
-    if (res.token) setToken(res.token, res.expiresAt)
+    // Token 由 HttpOnly Cookie 设置，前端只记录过期时间
+    setToken('', res.expiresAt)
     return res
   }
 

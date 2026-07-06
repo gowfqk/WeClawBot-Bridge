@@ -136,6 +136,7 @@ docker run -d \
 | `SESSION_MAX_ROUNDS` | 会话最大轮次，`0` = 不限制 | `0` |
 | `SESSION_EXPIRE_MS` | 会话过期时间（毫秒），`0` = 永不过期 | `0` |
 | `ALLOWED_ORIGINS` | CORS 允许的源（逗号分隔） | `http://localhost:3000` |
+| `WEBHOOK_SECRET` | Webhook 密钥，设置后需 `X-Webhook-Secret` 头认证 | 无（回退到 Bearer Token） |
 
 ## 📡 API 端点
 
@@ -164,10 +165,21 @@ docker run -d \
 
 ### Webhook 使用示例
 
+> **认证说明**：Webhook 端点需要认证。支持两种方式：
+> - **Webhook Secret**：设置环境变量 `WEBHOOK_SECRET` 后，请求需携带 `X-Webhook-Secret` 头（推荐用于 CI/CD）
+> - **Bearer Token**：未设置 `WEBHOOK_SECRET` 时，使用管理面板的会话 Token 认证
+
 ```bash
-# 纯文本
+# 使用 Webhook Secret 认证（推荐）
 curl -X POST https://your-domain/api/webhook \
   -H "Content-Type: application/json" \
+  -H "X-Webhook-Secret: your-webhook-secret" \
+  -d '{"content":{"text":"部署完成 ✅"}}'
+
+# 使用 Bearer Token 认证
+curl -X POST https://your-domain/api/webhook \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <session-token>" \
   -d '{"content":{"text":"部署完成 ✅"}}'
 
 # Markdown 格式（微信支持渲染）
@@ -188,13 +200,14 @@ curl -X POST https://your-domain/api/webhook \
 
 ### GitHub Actions 集成
 
-在仓库 Secrets 中添加 `WECLAW_WEBHOOK_URL` 指向你的 webhook 地址：
+在仓库 Secrets 中添加 `WECLAW_WEBHOOK_URL` 和 `WECLAW_WEBHOOK_SECRET`：
 
 ```yaml
 - name: 微信通知
   run: |
     curl -s -X POST ${{ secrets.WECLAW_WEBHOOK_URL }} \
       -H "Content-Type: application/json" \
+      -H "X-Webhook-Secret: ${{ secrets.WECLAW_WEBHOOK_SECRET }}" \
       -d "{\"content\":{\"text\":\"✅ [${{ github.repository }}] 部署成功\"}}"
 ```
 

@@ -33,7 +33,7 @@ describe('Schemas', () => {
     })
 
     it('accepts valid input', () => {
-      const r = validate(ChangePasswordSchema, { oldPassword: 'old', newPassword: 'new1' })
+      const r = validate(ChangePasswordSchema, { oldPassword: 'old', newPassword: 'newpassword1' })
       expect(r.ok).toBe(true)
     })
   })

@@ -184,6 +184,50 @@ export class AgentRegistry {
     return parts.length > 0 ? parts.join('') : null
   }
 
+  /** 处理单行 QwenPaw SSE data，返回 'completed' 表示应提前返回 */
+  private processQwenPawSSELine(
+    dataPayload: string,
+    parts: string[],
+    lastErrorRef: { value: string | null },
+  ): 'completed' | 'continue' {
+    if (dataPayload === '[DONE]') return 'continue'
+    try {
+      const parsed = JSON.parse(dataPayload) as Record<string, unknown>
+
+      // 处理失败事件
+      if (parsed.status === 'failed') {
+        const err = parsed.error as Record<string, unknown> | undefined
+        if (err?.message && typeof err.message === 'string') {
+          lastErrorRef.value = err.message as string
+        }
+        return 'continue'
+      }
+
+      // 处理完成事件：从 output 提取完整文本
+      if (parsed.status === 'completed' && parsed.output) {
+        const outputText = this.extractQwenPawText(parsed)
+        if (outputText) {
+          parts.length = 0
+          parts.push(outputText)
+          return 'completed'
+        }
+      }
+
+      // 处理流式增量：顶层 content 数组
+      const content = parsed.content as Array<Record<string, unknown>> | undefined
+      if (content) {
+        for (const block of content) {
+          if (block.type === 'text' && typeof block.text === 'string') {
+            parts.push(block.text)
+          }
+        }
+      }
+    } catch {
+      // skip non-JSON
+    }
+    return 'continue'
+  }
+
   /** Parse QwenPaw SSE stream
    *  QwenPaw 始终返回 SSE，事件格式：
    *  - status:"created" / "in_progress" → 开始/进行中
@@ -198,7 +242,7 @@ export class AgentRegistry {
 
     const decoder = new TextDecoder()
     const parts: string[] = []
-    let lastError: string | null = null
+    const lastErrorRef = { value: null as string | null }
     let lineBuffer = '' // 缓冲跨 chunk 的不完整行
 
     try {
@@ -215,38 +259,8 @@ export class AgentRegistry {
           const trimmed = line.trim()
           if (!trimmed.startsWith('data:')) continue
           const dataPayload = trimmed.slice(5).trim()
-          if (dataPayload === '[DONE]') continue
-          try {
-            const parsed = JSON.parse(dataPayload) as Record<string, unknown>
-
-            // 处理失败事件
-            if (parsed.status === 'failed') {
-              const err = parsed.error as Record<string, unknown> | undefined
-              if (err?.message && typeof err.message === 'string') {
-                lastError = err.message as string
-              }
-              continue
-            }
-
-            // 处理完成事件：从 output 提取完整文本
-            if (parsed.status === 'completed' && parsed.output) {
-              const outputText = this.extractQwenPawText(parsed)
-              if (outputText) {
-                return outputText
-              }
-            }
-
-            // 处理流式增量：顶层 content 数组
-            const content = parsed.content as Array<Record<string, unknown>> | undefined
-            if (content) {
-              for (const block of content) {
-                if (block.type === 'text' && typeof block.text === 'string') {
-                  parts.push(block.text)
-                }
-              }
-            }
-          } catch {
-            // skip non-JSON
+          if (this.processQwenPawSSELine(dataPayload, parts, lastErrorRef) === 'completed') {
+            return parts.join('')
           }
         }
       }
@@ -255,27 +269,8 @@ export class AgentRegistry {
       const tailTrimmed = lineBuffer.trim()
       if (tailTrimmed.startsWith('data:')) {
         const dataPayload = tailTrimmed.slice(5).trim()
-        if (dataPayload !== '[DONE]') {
-          try {
-            const parsed = JSON.parse(dataPayload) as Record<string, unknown>
-            if (parsed.status === 'failed') {
-              const err = parsed.error as Record<string, unknown> | undefined
-              if (err?.message && typeof err.message === 'string') {
-                lastError = err.message as string
-              }
-            } else if (parsed.status === 'completed' && parsed.output) {
-              const outputText = this.extractQwenPawText(parsed)
-              if (outputText) return outputText
-            }
-            const content = parsed.content as Array<Record<string, unknown>> | undefined
-            if (content) {
-              for (const block of content) {
-                if (block.type === 'text' && typeof block.text === 'string') {
-                  parts.push(block.text)
-                }
-              }
-            }
-          } catch { /* skip */ }
+        if (this.processQwenPawSSELine(dataPayload, parts, lastErrorRef) === 'completed') {
+          return parts.join('')
         }
       }
     } finally {
@@ -286,7 +281,7 @@ export class AgentRegistry {
     if (parts.length > 0) return parts.join('')
 
     // 返回服务端错误信息
-    if (lastError) return `Agent 错误：${lastError}`
+    if (lastErrorRef.value) return `Agent 错误：${lastErrorRef.value}`
 
     return ''
   }
@@ -376,10 +371,28 @@ export class AgentRegistry {
         return { reply: { text: `Agent 响应超时（>${Math.round((agent.timeout || 30000) / 1000)}s），请稍后再试。` } }
       }
       log.error({ agentId: agent.id, err: error.message }, 'Agent unexpected error')
-      return { reply: { text: `Agent 调用失败：${error.message}` } }
+      return { reply: { text: 'Agent 调用失败，请稍后再试或联系管理员。' } }
     } finally {
       clearTimeout(timeout)
     }
+  }
+
+  /** 处理单行 OpenAI SSE data */
+  private processOpenAISSELine(dataPayload: string): string {
+    if (dataPayload === '[DONE]') return ''
+    try {
+      const parsed = JSON.parse(dataPayload) as Record<string, unknown>
+      const choices = parsed.choices as Array<Record<string, unknown>> | undefined
+      if (choices?.[0]) {
+        const delta = choices[0].delta as Record<string, unknown> | undefined
+        if (typeof delta?.content === 'string') {
+          return delta.content
+        }
+      }
+    } catch {
+      // skip non-JSON
+    }
+    return ''
   }
 
   private async readSSEStream(response: Response): Promise<string> {
@@ -402,38 +415,13 @@ export class AgentRegistry {
         for (const line of lines) {
           const trimmed = line.trim()
           if (!trimmed.startsWith('data:')) continue
-          const payload = trimmed.slice(5).trim()
-          if (payload === '[DONE]') break
-          try {
-            const parsed = JSON.parse(payload) as Record<string, unknown>
-            const choices = parsed.choices as Array<Record<string, unknown>> | undefined
-            if (choices?.[0]) {
-              const delta = choices[0].delta as Record<string, unknown> | undefined
-              if (typeof delta?.content === 'string') {
-                accumulated += delta.content
-              }
-            }
-          } catch {
-            // skip non-JSON
-          }
+          accumulated += this.processOpenAISSELine(trimmed.slice(5).trim())
         }
       }
       // 处理缓冲区中剩余的最后一行
       const tailTrimmed = lineBuffer.trim()
       if (tailTrimmed.startsWith('data:')) {
-        const payload = tailTrimmed.slice(5).trim()
-        if (payload !== '[DONE]') {
-          try {
-            const parsed = JSON.parse(payload) as Record<string, unknown>
-            const choices = parsed.choices as Array<Record<string, unknown>> | undefined
-            if (choices?.[0]) {
-              const delta = choices[0].delta as Record<string, unknown> | undefined
-              if (typeof delta?.content === 'string') {
-                accumulated += delta.content
-              }
-            }
-          } catch { /* skip */ }
-        }
+        accumulated += this.processOpenAISSELine(tailTrimmed.slice(5).trim())
       }
     } finally {
       reader.releaseLock()

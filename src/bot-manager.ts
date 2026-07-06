@@ -137,16 +137,17 @@ export class BotManager {
 
   // ===== 心跳保活 =====
 
-  /** 启动定期心跳，防止微信 token 48 小时不活动失效 */
+  /** 启动定期心跳，防止微信 token 48 小时不活动失效
+   *  使用 sendTyping 而非发送消息，避免打扰用户 */
   startKeepalive(): void {
     if (this.keepaliveTimer) return
     this.keepaliveTimer = setInterval(() => {
       if (!this.status.loggedIn || !this.status.currentUser) return
       const user = this.status.currentUser
-      this.bot.send(user, { text: '🏓' }).then(() => {
-        log.info({ user }, 'Keepalive ping sent')
+      this.bot.sendTyping(user).then(() => {
+        log.info({ user }, 'Keepalive typing sent')
       }).catch((err) => {
-        log.error({ err }, 'Keepalive ping failed')
+        log.error({ err }, 'Keepalive typing failed')
       })
     }, this.KEEPALIVE_INTERVAL)
     log.info({ intervalHours: this.KEEPALIVE_INTERVAL / 3600000 }, 'Keepalive started')

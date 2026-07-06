@@ -9,7 +9,7 @@
               <n-input v-model:value="pwdForm.oldPassword" type="password" show-password-on="click" placeholder="输入当前密码" />
             </n-form-item>
             <n-form-item label="新密码" path="newPassword">
-              <n-input v-model:value="pwdForm.newPassword" type="password" show-password-on="click" placeholder="至少4位字符" />
+              <n-input v-model:value="pwdForm.newPassword" type="password" show-password-on="click" placeholder="至少8位字符" />
             </n-form-item>
             <n-form-item label="确认新密码" path="newPassword2">
               <n-input v-model:value="pwdForm.newPassword2" type="password" show-password-on="click" placeholder="再次输入新密码" />
@@ -87,7 +87,7 @@ const pwdRules: FormRules = {
   oldPassword: { required: true, message: '请输入当前密码', trigger: 'blur' },
   newPassword: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 4, message: '新密码至少4位', trigger: 'blur' },
+    { min: 8, message: '新密码至少8位', trigger: 'blur' },
   ],
   newPassword2: [
     { required: true, message: '请确认新密码', trigger: 'blur' },

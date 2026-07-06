@@ -125,13 +125,20 @@ interface Agent {
   description: string
   endpoint?: string
   timeout: number
+  headers?: Record<string, string>
+  cliEnv?: Record<string, string>
   apiKey?: string
   model?: string
   format?: string
+  streaming?: boolean
+  responsePath?: string
+  systemPrompt?: string
+  maxHistory?: number
   cliCommand?: string
   cliArgs?: string[]
   cliWorkDir?: string
   cliMode?: string
+  cliSentinel?: string
 }
 
 const message = useMessage()
