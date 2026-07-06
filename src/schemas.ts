@@ -26,7 +26,7 @@ export const AgentConfigSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   command: z.string().min(1),
-  type: z.enum(['cli', 'http']),
+  type: z.enum(['cli', 'http', 'ws']),
   description: z.string(),
   endpoint: z.string().optional(),
   timeout: z.number().int().positive().max(300000),
@@ -44,6 +44,10 @@ export const AgentConfigSchema = z.object({
   cliWorkDir: z.string().optional(),
   cliMode: z.enum(['oneshot', 'persistent']).optional(),
   cliSentinel: z.string().optional(),
+  wsUrl: z.string().optional(),
+  wsReconnectInterval: z.number().int().positive().max(60000).optional(),
+  wsHeartbeatInterval: z.number().int().positive().max(120000).optional(),
+  wsMaxReconnectAttempts: z.number().int().nonnegative().optional(),
 })
 
 /** 通知发送 */

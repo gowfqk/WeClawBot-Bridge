@@ -1,5 +1,6 @@
 import type { AgentConfig, AgentPayload, AgentResponse } from './types'
 import { CliAgentAdapter } from './cli-agent'
+import { WsAgentChannel, type WsChannelStatus } from './ws-agent-channel'
 import { createLogger } from './logger'
 
 const log = createLogger('agent-registry')
@@ -12,6 +13,7 @@ export class AgentRegistry {
   private agents: Map<string, AgentConfig> = new Map()
   private commandIndex: Map<string, string> = new Map()
   private cliAdapter: CliAgentAdapter
+  private wsChannels: Map<string, WsAgentChannel> = new Map()
   private defaultFallbackText: string
 
   constructor(defaultFallbackText?: string) {
@@ -22,6 +24,10 @@ export class AgentRegistry {
   register(config: AgentConfig): void {
     this.agents.set(config.id, { ...config })
     this.commandIndex.set(config.command.toLowerCase(), config.id)
+    // WS 类型：自动建立持久连接
+    if (config.type === 'ws') {
+      this.connectWs(config)
+    }
   }
 
   unregister(id: string): void {
@@ -30,6 +36,9 @@ export class AgentRegistry {
       this.commandIndex.delete(agent.command.toLowerCase())
       if (agent.type === 'cli') {
         this.cliAdapter.closeSession(id)
+      }
+      if (agent.type === 'ws') {
+        this.disconnectWs(id)
       }
       this.agents.delete(id)
     }
@@ -57,6 +66,10 @@ export class AgentRegistry {
 
     if (agent.type === 'cli') {
       return this.cliAdapter.invoke(agent, payload)
+    }
+
+    if (agent.type === 'ws') {
+      return this.invokeWs(agentId, payload)
     }
 
     return this.invokeHttp(agent, payload)
@@ -465,5 +478,62 @@ export class AgentRegistry {
 
   closeAllCliSessions(): void {
     this.cliAdapter.closeAll()
+  }
+
+  /** WS 通道：建立持久连接 */
+  private connectWs(agent: AgentConfig): void {
+    if (this.wsChannels.has(agent.id)) {
+      this.wsChannels.get(agent.id)!.disconnect()
+    }
+    const channel = new WsAgentChannel(agent, (id, status) => {
+      if (status === 'connected') {
+        log.info({ agentId: id }, 'WS 通道已连接')
+      } else if (status === 'failed') {
+        log.error({ agentId: id }, 'WS 通道连接失败，已停止重连')
+      }
+    })
+    this.wsChannels.set(agent.id, channel)
+    channel.connect()
+  }
+
+  /** WS 通道：断开连接 */
+  private disconnectWs(agentId: string): void {
+    const channel = this.wsChannels.get(agentId)
+    if (channel) {
+      channel.disconnect()
+      this.wsChannels.delete(agentId)
+    }
+  }
+
+  /** WS 通道：调用 Agent */
+  private async invokeWs(agentId: string, payload: AgentPayload): Promise<AgentResponse> {
+    const channel = this.wsChannels.get(agentId)
+    if (!channel) {
+      return { reply: { text: 'WS Agent 通道未初始化。' } }
+    }
+
+    if (channel.status !== 'connected') {
+      return { reply: { text: 'Agent 连接中断，正在重连，消息已排队。' } }
+    }
+
+    try {
+      return await channel.invoke(payload)
+    } catch (err) {
+      const error = err as Error
+      if (error.message.includes('超时')) {
+        return { reply: { text: `Agent 响应超时，请稍后再试。` } }
+      }
+      log.error({ agentId, err: error.message }, 'WS Agent 调用失败')
+      return { reply: { text: 'Agent 调用失败，请稍后再试。' } }
+    }
+  }
+
+  /** 获取所有 WS 通道状态 */
+  getWsStatus(): Record<string, WsChannelStatus> {
+    const status: Record<string, WsChannelStatus> = {}
+    for (const [id, channel] of this.wsChannels) {
+      status[id] = channel.status
+    }
+    return status
   }
 }

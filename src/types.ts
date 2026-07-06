@@ -1,4 +1,4 @@
-export type AgentType = 'http' | 'cli'
+export type AgentType = 'http' | 'cli' | 'ws'
 
 export interface AgentConfig {
   id: string
@@ -23,6 +23,11 @@ export interface AgentConfig {
   cliWorkDir?: string
   cliMode?: 'oneshot' | 'persistent'
   cliSentinel?: string
+  /** WebSocket 通道配置 */
+  wsUrl?: string
+  wsReconnectInterval?: number   // 重连间隔 ms，默认 3000
+  wsHeartbeatInterval?: number   // 心跳间隔 ms，默认 30000
+  wsMaxReconnectAttempts?: number // 最大重连次数，默认 Infinity
 }
 
 export interface UserState {

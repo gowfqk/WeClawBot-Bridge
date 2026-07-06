@@ -42,6 +42,33 @@
           </n-form-item>
         </template>
 
+        <!-- WS 字段 -->
+        <template v-if="form.type === 'ws'">
+          <n-grid :cols="2" :x-gap="16">
+            <n-form-item-gi label="WS 端点" path="wsUrl">
+              <n-input v-model:value="form.wsUrl" placeholder="ws://host:port/ws 或 wss://..." />
+            </n-form-item-gi>
+            <n-form-item-gi label="API Key" path="apiKey">
+              <n-input v-model:value="form.apiKey" type="password" show-password-on="click" placeholder="可选" />
+            </n-form-item-gi>
+            <n-form-item-gi label="模型" path="model">
+              <n-input v-model:value="form.model" placeholder="可选" />
+            </n-form-item-gi>
+            <n-form-item-gi label="超时 (ms)" path="timeout">
+              <n-input-number v-model:value="form.timeout" :min="1000" :step="1000" style="width: 100%" />
+            </n-form-item-gi>
+            <n-form-item-gi label="重连间隔 (ms)" path="wsReconnectInterval">
+              <n-input-number v-model:value="form.wsReconnectInterval" :min="500" :step="500" placeholder="默认 3000" style="width: 100%" />
+            </n-form-item-gi>
+            <n-form-item-gi label="心跳间隔 (ms)" path="wsHeartbeatInterval">
+              <n-input-number v-model:value="form.wsHeartbeatInterval" :min="5000" :step="5000" placeholder="默认 30000" style="width: 100%" />
+            </n-form-item-gi>
+            <n-form-item-gi label="最大重连次数" path="wsMaxReconnectAttempts">
+              <n-input-number v-model:value="form.wsMaxReconnectAttempts" :min="0" :step="1" placeholder="默认无限" style="width: 100%" />
+            </n-form-item-gi>
+          </n-grid>
+        </template>
+
         <!-- CLI 字段 -->
         <template v-if="form.type === 'cli'">
           <n-grid :cols="2" :x-gap="16">
@@ -121,7 +148,7 @@ interface Agent {
   id: string
   name: string
   command: string
-  type: 'http' | 'cli'
+  type: 'http' | 'cli' | 'ws'
   description: string
   endpoint?: string
   timeout: number
@@ -139,6 +166,10 @@ interface Agent {
   cliWorkDir?: string
   cliMode?: string
   cliSentinel?: string
+  wsUrl?: string
+  wsReconnectInterval?: number
+  wsHeartbeatInterval?: number
+  wsMaxReconnectAttempts?: number
 }
 
 const message = useMessage()
@@ -169,6 +200,7 @@ const cliArgsText = ref('')
 
 const typeOptions = [
   { label: 'HTTP', value: 'http' },
+  { label: 'WebSocket', value: 'ws' },
   { label: 'CLI', value: 'cli' },
 ]
 const formatOptions = [
@@ -245,7 +277,7 @@ async function handleSubmit() {
     payload.cliArgs = cliArgsText.value ? cliArgsText.value.split(',').map((s) => s.trim()) : []
   }
   // 空字符串的可选字段转为 undefined，避免后端把 '' 当有效值
-  for (const key of ['endpoint', 'apiKey', 'model', 'format', 'cliCommand', 'cliWorkDir', 'cliMode'] as const) {
+  for (const key of ['endpoint', 'apiKey', 'model', 'format', 'cliCommand', 'cliWorkDir', 'cliMode', 'wsUrl'] as const) {
     if ((payload as any)[key] === '') (payload as any)[key] = undefined
   }
 
