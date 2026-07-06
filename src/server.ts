@@ -295,16 +295,16 @@ export function createServer(
 
   app.post('/api/bot/login', dynamicAuth, async (_req, res) => {
     try {
-      let qrUrl: string | undefined
-      await botManager.login((url) => {
-        qrUrl = url
+      // 触发登录（不 await 整个过程，否则等到扫码才返回）
+      botManager.login((url) => {
+        // qrUrl 回调时无需额外处理，getStatus() 会自动拿到
+      }).catch((err) => {
+        logger.error({ err: (err as Error).message }, 'Background login error')
       })
-      if (!botManager.isRunning) {
-        await botManager.start()
-        botStatus.set(1)
-        logger.info('Bot started after manual login')
-      }
-      res.json({ qrUrl, status: 'waiting_for_scan' })
+      // 等一小段时间让 qrUrl 回调触发
+      await new Promise((r) => setTimeout(r, 2000))
+      const status = botManager.getStatus()
+      res.json({ qrUrl: status.qrUrl, status: 'waiting_for_scan' })
     } catch (err) {
       logger.error({ err: (err as Error).message }, 'Bot login error')
       res.status(500).json({ error: 'Bot 登录失败，请重试' })

@@ -34,11 +34,7 @@
             </template>
             <template v-else-if="botStatus.qrUrl">
               <div class="qr-container">
-                <img
-                  :src="qrImageUrl"
-                  alt="微信登录二维码"
-                  class="qr-image"
-                />
+                <QrcodeVue :value="botStatus.qrUrl" :size="240" level="M" />
               </div>
               <n-text depth="3" style="font-size: 13px">
                 请使用微信扫描二维码登录
@@ -68,8 +64,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
+import QrcodeVue from 'qrcode.vue'
 import { api } from '../composables/api'
 
 interface BotStatusInfo {
@@ -84,11 +81,6 @@ const message = useMessage()
 const botStatus = ref<BotStatusInfo>({ loggedIn: false, polling: false })
 const loginLoading = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
-
-const qrImageUrl = computed(() => {
-  if (!botStatus.value.qrUrl) return ''
-  return `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(botStatus.value.qrUrl)}`
-})
 
 async function loadStatus() {
   try {
@@ -133,10 +125,5 @@ onUnmounted(() => {
   border-radius: 12px;
   background: var(--n-color, #fff);
   display: inline-block;
-}
-.qr-image {
-  width: 240px;
-  height: 240px;
-  border-radius: 8px;
 }
 </style>
