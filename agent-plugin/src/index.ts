@@ -47,6 +47,25 @@ export interface AgentPluginConfig {
   heartbeatInterval?: number
   /** 最大重连次数（默认 Infinity） */
   maxReconnectAttempts?: number
+  /** AI 后端配置（可选：设置后自动转发消息，无需 onMessage handler） */
+  aiBackend?: {
+    /** API 端点 URL（OpenAI 格式会自动补全 /chat/completions） */
+    url: string
+    /** API Key（通过 Authorization: Bearer 发送） */
+    apiKey?: string
+    /** 请求格式：openai（默认）| qwenpaw | native */
+    format?: 'openai' | 'qwenpaw' | 'native'
+    /** 模型名称 */
+    model?: string
+    /** 请求超时 ms（默认 60000） */
+    timeout?: number
+    /** 额外的请求头 */
+    headers?: Record<string, string>
+    /** System prompt（仅 openai 格式生效） */
+    systemPrompt?: string
+    /** 最大历史消息数（默认 50） */
+    maxHistory?: number
+  }
 }
 
 export interface IncomingMessage {
@@ -167,11 +186,11 @@ export class WeClawBotAgent {
       this.handleMessage(data)
     })
 
-    this.ws.on('close', (code, reason) => {
+    this.ws.on('close', (code: number, reason: Buffer) => {
       this.onDisconnect(`连接关闭 (${code}: ${reason.toString() || 'no reason'})`)
     })
 
-    this.ws.on('error', (err) => {
+    this.ws.on('error', (err: Error) => {
       console.error('[WeClawBot] 连接错误:', err.message)
     })
 
@@ -257,13 +276,6 @@ export class WeClawBotAgent {
   }
 
   private async handleChat(msg: ServerChatMessage): Promise<void> {
-    if (!this.messageHandler) {
-      console.warn('[WeClawBot] 收到聊天消息但未注册 handler')
-      // 回复默认消息
-      this.sendReply(msg.id, 'Agent 未就绪，请稍后再试。')
-      return
-    }
-
     const incoming: IncomingMessage = {
       id: msg.id,
       text: msg.payload.message.text,
@@ -274,13 +286,33 @@ export class WeClawBotAgent {
       media: msg.payload.message.media,
     }
 
-    try {
-      const reply = await this.messageHandler(incoming)
-      this.sendReply(msg.id, reply.text)
-    } catch (err) {
-      console.error('[WeClawBot] 消息处理失败:', err)
-      this.sendReply(msg.id, '处理消息时出错，请稍后再试。')
+    // Priority 1: custom handler
+    if (this.messageHandler) {
+      try {
+        const reply = await this.messageHandler(incoming)
+        this.sendReply(msg.id, reply.text)
+      } catch (err) {
+        console.error('[WeClawBot] 消息处理失败:', err)
+        this.sendReply(msg.id, '处理消息时出错，请稍后再试。')
+      }
+      return
     }
+
+    // Priority 2: built-in AI backend
+    if (this.config.aiBackend) {
+      try {
+        const text = await this.callAiBackend(incoming)
+        this.sendReply(msg.id, text)
+      } catch (err) {
+        console.error('[WeClawBot] AI 后端调用失败:', err)
+        this.sendReply(msg.id, `AI 后端错误：${(err as Error).message}`)
+      }
+      return
+    }
+
+    // No handler configured
+    console.warn('[WeClawBot] 收到聊天消息但未注册 handler 且未配置 AI 后端')
+    this.sendReply(msg.id, 'Agent 未就绪，请配置 onMessage handler 或 aiBackend 选项。')
   }
 
   private sendReply(id: string, text: string): void {
@@ -290,6 +322,128 @@ export class WeClawBotAgent {
     }
     const reply: ChatReplyMessage = { type: 'chat', id, text }
     this.ws.send(JSON.stringify(reply))
+  }
+
+  /** 内置 AI 后端调用（无需自定义 onMessage handler） */
+  private async callAiBackend(msg: IncomingMessage): Promise<string> {
+    const backend = this.config.aiBackend!
+    const format = backend.format || 'openai'
+
+    let body: Record<string, unknown>
+    let apiPath = backend.url
+
+    if (format === 'openai') {
+      const messages: Array<{ role: string; content: string }> = []
+      if (backend.systemPrompt) {
+        messages.push({ role: 'system', content: backend.systemPrompt })
+      }
+      const maxHistory = backend.maxHistory ?? 50
+      const history = msg.history.slice(-maxHistory)
+      for (const h of history) {
+        messages.push({ role: h.role, content: h.content })
+      }
+      messages.push({ role: 'user', content: msg.text })
+      body = { messages, stream: false }
+      if (backend.model) body.model = backend.model
+      if (!apiPath.endsWith('/chat/completions')) {
+        apiPath = apiPath.replace(/\/+$/, '') + '/chat/completions'
+      }
+    } else if (format === 'qwenpaw') {
+      const input: Array<Record<string, unknown>> = []
+      for (const h of msg.history) {
+        input.push({
+          type: 'message',
+          role: h.role,
+          content: [{ type: 'text', text: h.content }],
+          status: 'completed',
+        })
+      }
+      input.push({
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'text', text: msg.text }],
+        status: 'completed',
+      })
+      body = {
+        input,
+        session_id: msg.userId,
+        user_id: msg.userId,
+        stream: false,
+      }
+      if (backend.model) body.model = backend.model
+      if (backend.apiKey) body.api_key = backend.apiKey
+      if (!apiPath.endsWith('/api/console/chat')) {
+        apiPath = apiPath.replace(/\/+$/, '') + '/api/console/chat'
+      }
+    } else {
+      // native format
+      body = {
+        message: { text: msg.text, type: msg.type, media: msg.media ?? null },
+        session: {
+          userId: msg.userId,
+          agentId: msg.agentId,
+          history: msg.history,
+        },
+      }
+      if (backend.model) body.model = backend.model
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(backend.headers || {}),
+    }
+    if (backend.apiKey && format !== 'qwenpaw') {
+      headers['Authorization'] = `Bearer ${backend.apiKey}`
+    }
+    // QwenPaw: api_key 在 body 中（上方已设置），header 也同时发送以兼容
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), backend.timeout ?? 60000)
+
+    try {
+      const response = await fetch(apiPath, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '')
+        throw new Error(`HTTP ${response.status}${errText ? ': ' + errText.slice(0, 200) : ''}`)
+      }
+
+      const data = (await response.json()) as Record<string, unknown>
+
+      if (format === 'openai') {
+        const choices = data.choices as Array<Record<string, unknown>> | undefined
+        const content = choices?.[0]?.message as Record<string, unknown> | undefined
+        return (content?.content as string) || ''
+      }
+
+      if (format === 'qwenpaw') {
+        const output = data.output as Array<Record<string, unknown>> | undefined
+        if (output && output.length > 0) {
+          const lastMsg = output[output.length - 1]
+          const content = lastMsg.content as Array<Record<string, unknown>> | undefined
+          if (content) {
+            return content
+              .filter((c) => c.type === 'text')
+              .map((c) => c.text as string)
+              .join('')
+          }
+        }
+        return ''
+      }
+
+      // native / fallback
+      if (data.reply && typeof (data.reply as Record<string, unknown>).text === 'string') {
+        return (data.reply as Record<string, unknown>).text as string
+      }
+      return (data.text as string) || (data.content as string) || (data.response as string) || ''
+    } finally {
+      clearTimeout(timeout)
+    }
   }
 
   private onDisconnect(reason: string): void {

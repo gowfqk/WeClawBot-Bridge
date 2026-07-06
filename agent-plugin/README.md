@@ -27,6 +27,38 @@ npm install weclawbot-agent-plugin
 
 ## 快速开始
 
+### 方式一：零代码（aiBackend 配置）
+
+**推荐**：如果你对接的是标准 AI API（Hermes、OpenClaw、QwenPaw 等），无需写任何代码，直接配置 `aiBackend` 即可：
+
+```typescript
+import { WeClawBotAgent } from 'weclawbot-agent-plugin'
+
+const agent = new WeClawBotAgent({
+  bridgeUrl: 'ws://bridge-host:3000/ws/agent',
+  agentId: 'my-agent',
+  token: 'wsk_my-agent_xxx',
+  name: 'Hermes Agent',
+  command: 'hermes',
+  aiBackend: {
+    url: 'https://your-ai-api.com',     // AI 服务地址
+    apiKey: 'sk-xxx',                    // API Key
+    format: 'openai',                    // openai | qwenpaw | native
+    model: 'gpt-4',                      // 可选：模型名
+    systemPrompt: 'You are helpful.',    // 可选：system prompt（仅 openai）
+  },
+}, (status) => {
+  console.log('状态:', status)
+})
+
+// 无需 onMessage handler！
+agent.connect()
+```
+
+### 方式二：自定义处理（onMessage）
+
+如果你需要自定义消息处理逻辑（如调用本地模型、多 Agent 路由等）：
+
 ### 1. 在 Bridge 管理面板创建 WS Remote Agent
 
 管理面板 → **Agent 管理** → 添加 `WS Remote (插件接入)` 类型 Agent → 点击「生成 Token」→ 复制安装命令。
