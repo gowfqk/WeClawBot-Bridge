@@ -99,8 +99,8 @@ async function main(): Promise<void> {
     },
     onAgentDisconnect: (agentId) => {
       logger.info({ agentId }, 'WS Agent 已离线')
-      // Agent 离线时从 registry 移除，避免路由到不在线的 Agent
-      agentRegistry.unregister(agentId)
+      // 不从 registry 移除 — Agent 配置持久保留，仅靠 isOnline() 控制路由
+      // 离线时 invokeWsRemote 会返回 "不在线" 提示
       commandHandler.updateAgents(agentRegistry.listAll())
     },
     onAgentPush: (agentId, text, userId) => {

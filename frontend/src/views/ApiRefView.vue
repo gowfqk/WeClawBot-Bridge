@@ -11,81 +11,191 @@
       <!-- 右侧文档 -->
       <n-gi :span="18">
         <n-space vertical :size="24">
-          <!-- 功能概览 -->
-          <n-card id="doc-overview" title="功能概览">
-            <n-text>WeClawBot Bridge 是微信 ↔ AI Agent 桥接网关，提供以下核心功能：</n-text>
-            <n-ul style="margin-top: 12px">
-              <n-li>微信 Bot 登录与消息收发</n-li>
-              <n-li>AI Agent 注册、调度与测试</n-li>
-              <n-li>会话管理与上下文保持</n-li>
-              <n-li>定时/事件通知推送</n-li>
-              <n-li>配置备份与恢复</n-li>
-            </n-ul>
+          <!-- 快速上手 -->
+          <n-card id="doc-quickstart" title="🚀 快速上手">
+            <n-text>三步开始用 WeClawBot 和微信里的 AI 对话：</n-text>
+            <n-steps vertical style="margin-top: 16px">
+              <n-step title="登录微信" status="finish">
+                <template #description>
+                  进入 <n-text code>Bot 控制</n-text> 页面，点击「刷新二维码」，用微信扫码登录。
+                </template>
+              </n-step>
+              <n-step title="添加 Agent" status="finish">
+                <template #description>
+                  进入 <n-text code>Agent 管理</n-text> 页面，添加你的 AI 服务（支持 OpenAI 格式、CLI 工具、WS 插件接入）。
+                </template>
+              </n-step>
+              <n-step title="微信对话" status="finish">
+                <template #description>
+                  在微信中发 <n-text code>#命令</n-text> 切换 Agent，之后直接发消息即可对话。
+                </template>
+              </n-step>
+            </n-steps>
           </n-card>
 
-          <!-- 认证 -->
-          <n-card id="doc-auth" title="认证">
-            <n-text>所有管理 API 需要通过 Bearer Token 认证。首次使用需设置管理密码。</n-text>
-            <api-method method="POST" path="/api/auth/login" desc="登录管理面板" />
-            <api-params :params="authLoginParams" />
-            <api-method method="GET" path="/api/auth/status" desc="查询认证状态" />
-            <api-method method="POST" path="/api/auth/setup" desc="首次设置密码" />
-            <api-params :params="authSetupParams" />
-            <api-method method="POST" path="/api/auth/change-password" desc="修改密码" />
-            <api-params :params="authChangeParams" />
-            <api-method method="POST" path="/api/auth/logout" desc="退出登录" />
-          </n-card>
-
-          <!-- Agent 管理 -->
-          <n-card id="doc-agents" title="Agent 管理">
-            <api-method method="GET" path="/api/agents" desc="获取所有 Agent 列表" />
-            <api-method method="POST" path="/api/agents" desc="注册新 Agent" />
-            <api-method method="PUT" path="/api/agents/:id" desc="更新 Agent 配置" />
-            <api-method method="DELETE" path="/api/agents/:id" desc="删除 Agent" />
-            <api-method method="POST" path="/api/agents/:id/test" desc="测试 Agent 响应" />
-            <api-params :params="[{ name: 'text', type: 'string', required: true, desc: '测试消息文本' }]" />
-          </n-card>
-
-          <!-- Bot 控制 -->
-          <n-card id="doc-bot" title="Bot 控制">
-            <api-method method="GET" path="/api/bot/status" desc="获取 Bot 在线状态" />
-            <api-method method="POST" path="/api/bot/login" desc="触发微信扫码登录" />
-            <n-text depth="3" style="font-size: 13px; display: block; margin-top: 8px">
-              登录后返回 qrUrl，前端可生成二维码供用户扫描。
+          <!-- 微信命令 -->
+          <n-card id="doc-commands" title="💬 微信命令">
+            <n-text>在微信中发送以下命令控制 Bot：</n-text>
+            <n-table :bordered="false" :single-line="false" style="margin-top: 12px">
+              <thead>
+                <tr><th>命令</th><th>说明</th><th>示例</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><n-text code>#help</n-text></td><td>显示帮助信息</td><td>#help</td></tr>
+                <tr><td><n-text code>#agents</n-text></td><td>列出所有可用 Agent</td><td>#agents</td></tr>
+                <tr><td><n-text code>#status</n-text></td><td>查看 Bot 当前状态</td><td>#status</td></tr>
+                <tr><td><n-text code>#命令</n-text></td><td>切换到指定 Agent</td><td>#hermes</td></tr>
+                <tr><td><n-text code>#clear</n-text></td><td>清空当前会话历史</td><td>#clear</td></tr>
+                <tr><td>直接发消息</td><td>与当前 Agent 对话</td><td>你好</td></tr>
+              </tbody>
+            </n-table>
+            <n-text depth="3" style="display: block; margin-top: 12px">
+              💡 切换 Agent 不会清空对话历史，每个 Agent 独立维护上下文。
             </n-text>
           </n-card>
 
-          <!-- 通知 -->
-          <n-card id="doc-notify" title="通知管理">
-            <api-method method="POST" path="/api/notify" desc="发送通知" />
-            <api-params :params="[{ name: 'content', type: 'object', required: true, desc: '通知内容 { text: string }' }]" />
-            <api-method method="POST" path="/api/notify/rules" desc="添加通知规则" />
-            <api-method method="DELETE" path="/api/notify/rules/:id" desc="删除通知规则" />
-            <api-method method="GET" path="/api/notify/log" desc="获取通知日志" />
-            <api-method method="POST" path="/api/webhook" desc="Webhook 发送通知" />
+          <!-- Agent 类型 -->
+          <n-card id="doc-agent-types" title="🤖 Agent 类型">
+            <n-tabs type="line">
+              <n-tab-pane name="http" tab="HTTP (OpenAI)">
+                <n-text>最常用的方式，兼容所有 OpenAI 格式的 API：</n-text>
+                <n-table :bordered="false" :single-line="false" style="margin-top: 12px">
+                  <thead><tr><th>字段</th><th>说明</th><th>示例</th></tr></thead>
+                  <tbody>
+                    <tr><td>命令</td><td>微信切换关键词</td><td>gpt</td></tr>
+                    <tr><td>类型</td><td>HTTP</td><td>http</td></tr>
+                    <tr><td>请求格式</td><td>OpenAI 兼容</td><td>openai</td></tr>
+                    <tr><td>端点 URL</td><td>API 地址（自动补 /chat/completions）</td><td>https://api.openai.com/v1</td></tr>
+                    <tr><td>API Key</td><td>认证密钥</td><td>sk-...</td></tr>
+                    <tr><td>模型</td><td>模型名称</td><td>gpt-4o</td></tr>
+                  </tbody>
+                </n-table>
+                <n-text depth="3" style="display: block; margin-top: 8px">
+                  支持流式 SSE 输出，支持 Vision（微信图片自动转 base64 image_url）。
+                </n-text>
+              </n-tab-pane>
+
+              <n-tab-pane name="cli" tab="CLI 命令行">
+                <n-text>将本地命令行工具直接接入微信：</n-text>
+                <n-table :bordered="false" :single-line="false" style="margin-top: 12px">
+                  <thead><tr><th>字段</th><th>说明</th><th>示例</th></tr></thead>
+                  <tbody>
+                    <tr><td>命令</td><td>微信切换关键词</td><td>claude</td></tr>
+                    <tr><td>类型</td><td>CLI</td><td>cli</td></tr>
+                    <tr><td>CLI 命令</td><td>可执行命令</td><td>claude</td></tr>
+                    <tr><td>模式</td><td>persistent（持久会话）/ oneshot</td><td>persistent</td></tr>
+                  </tbody>
+                </n-table>
+              </n-tab-pane>
+
+              <n-tab-pane name="ws-remote" tab="WS Remote 插件接入">
+                <n-text>AI Agent 通过插件 SDK 主动连接 Bridge，无需起 HTTP 服务：</n-text>
+                <n-steps vertical style="margin-top: 12px">
+                  <n-step title="添加 Agent" status="finish">
+                    <template #description>
+                      类型选 <n-text code>WS Remote (插件接入)</n-text>，填写命令和名称，点击「生成 Token」。
+                    </template>
+                  </n-step>
+                  <n-step title="安装插件" status="finish">
+                    <template #description>
+                      <n-text code>npm install weclawbot-agent-plugin</n-text>
+                    </template>
+                  </n-step>
+                  <n-step title="编写 Agent" status="finish">
+                    <template #description>
+                      <n-text depth="3" style="font-size: 13px">
+                        import { WeClawBotAgent } from 'weclawbot-agent-plugin'<br>
+                        const agent = new WeClawBotAgent({ bridgeUrl, agentId, token })<br>
+                        agent.onMessage(async (msg) =&gt; { return { text: await yourAI(msg.text) } })<br>
+                        agent.connect()
+                      </n-text>
+                    </template>
+                  </n-step>
+                </n-steps>
+                <n-text depth="3" style="display: block; margin-top: 8px">
+                  插件自动处理重连、心跳、认证。Agent 离线时消息会提示"不在线"而非丢失。
+                </n-text>
+              </n-tab-pane>
+            </n-tabs>
           </n-card>
 
-          <!-- 会话 -->
-          <n-card id="doc-sessions" title="会话管理">
-            <api-method method="GET" path="/api/sessions" desc="获取会话列表" />
-            <api-method method="GET" path="/api/sessions/detail" desc="获取会话详情" />
-            <api-params :params="sessionDetailParams" />
-            <api-method method="DELETE" path="/api/sessions/clear" desc="清空会话" />
-            <api-method method="GET" path="/api/sessions/config" desc="获取会话配置" />
-            <api-method method="PUT" path="/api/sessions/config" desc="更新会话配置" />
+          <!-- 会话管理 -->
+          <n-card id="doc-sessions" title="📝 会话管理">
+            <n-text>每个微信用户 × 每个 Agent 独立维护对话历史：</n-text>
+            <n-ul style="margin-top: 12px">
+              <n-li>切换 Agent 不清空上下文，回到之前的 Agent 继续对话</n-li>
+              <n-li>会话管理页面可查看所有会话列表与完整对话详情</n-li>
+              <n-li>支持设置最大对话轮次和过期时间（默认永不过期）</n-li>
+              <n-li>支持逐条删除或一键清空会话</n-li>
+            </n-ul>
           </n-card>
 
-          <!-- 配置 -->
-          <n-card id="doc-config" title="配置管理">
-            <api-method method="GET" path="/api/config" desc="获取配置状态" />
-            <api-method method="GET" path="/api/config/export" desc="导出配置备份（JSON）" />
-            <api-method method="POST" path="/api/config/import" desc="导入配置备份" />
+          <!-- 通知推送 -->
+          <n-card id="doc-notify" title="📢 通知与 Webhook">
+            <n-text>两种方式向微信推送消息：</n-text>
+            <n-h4 style="margin: 12px 0 4px">管理面板通知</n-h4>
+            <n-text depth="3">通知管理页面 → 输入内容 → 发送，支持文本和 Markdown 格式。</n-text>
+            <n-h4 style="margin: 12px 0 4px">Webhook（CI/CD 集成）</n-h4>
+            <n-text depth="3" style="font-size: 13px; display: block">
+              curl -X POST https://your-domain/api/webhook \\<br>
+              &nbsp;&nbsp;-H "Content-Type: application/json" \\<br>
+              &nbsp;&nbsp;-H "X-Webhook-Secret: your-secret" \\<br>
+              &nbsp;&nbsp;-d '{"content":{"text":"部署完成 ✅"}}'
+            </n-text>
+            <n-text depth="3" style="display: block; margin-top: 8px">
+              无需 userId，Bot 在线即可推送。适合 GitHub Actions、定时任务等场景。
+            </n-text>
           </n-card>
 
-          <!-- 监控 -->
-          <n-card id="doc-monitor" title="监控">
-            <api-method method="GET" path="/api/health" desc="健康检查" />
-            <api-method method="GET" path="/api/metrics" desc="Prometheus 格式指标" />
+          <!-- WS Agent 状态 -->
+          <n-card id="doc-ws-status" title="🔌 WS Agent 在线状态">
+            <n-text>WS Remote 类型的 Agent 在 Agent 管理列表中显示在线状态：</n-text>
+            <n-ul style="margin-top: 12px">
+              <n-li><n-text type="success">在线</n-text> — 插件已连接，消息正常路由</n-li>
+              <n-li><n-text type="error">离线</n-text> — 插件未连接，发消息会提示"不在线"</n-li>
+            </n-ul>
+            <n-text depth="3" style="display: block; margin-top: 8px">
+              Agent 配置持久保留，离线不会丢失。插件重连后自动恢复在线。
+            </n-text>
+          </n-card>
+
+          <!-- 配置备份 -->
+          <n-card id="doc-backup" title="💾 配置备份">
+            <n-text>设置页面支持导出/导入完整配置（JSON），包含：</n-text>
+            <n-ul style="margin-top: 12px">
+              <n-li>所有 Agent 配置（含 API Key）</n-li>
+              <n-li>会话配置（轮次限制、过期时间）</n-li>
+              <n-li>WS Agent Token</n-li>
+              <n-li>存储数据</n-li>
+            </n-ul>
+            <n-text depth="3" style="display: block; margin-top: 8px">
+              适合迁移、备份或恢复场景。
+            </n-text>
+          </n-card>
+
+          <!-- 常见问题 -->
+          <n-card id="doc-faq" title="❓ 常见问题">
+            <n-collapse>
+              <n-collapse-item title="微信二维码过期了怎么办？" name="qr">
+                管理面板会自动刷新二维码，无需手动操作。如果长时间未扫码，点击「刷新二维码」重新获取。
+              </n-collapse-item>
+              <n-collapse-item title="为什么 Agent 回复「服务繁忙」？" name="busy">
+                可能原因：API Key 无效、端点 URL 错误、模型名不对、后端服务不可达。
+                在 Agent 管理页面点击「测试」按钮，查看具体错误信息。
+              </n-collapse-item>
+              <n-collapse-item title="WS Agent 显示离线？" name="offline">
+                插件进程未运行或网络不通。检查插件端是否已 connect()，确认 Bridge 地址可达。
+                插件会自动重连（指数退避），通常网络恢复后几秒内重新上线。
+              </n-collapse-item>
+              <n-collapse-item title="如何让多个微信用户用不同的 Agent？" name="multi">
+                每个用户独立维护当前 Agent 和会话历史。用户 A 切换到 #hermes，
+                用户 B 切换到 #qc，互不影响。
+              </n-collapse-item>
+              <n-collapse-item title="对话历史会占很多内存吗？" name="memory">
+                可在会话管理页面设置最大轮次和过期时间。默认不限制轮次、永不过期。
+                对于高流量场景，建议设置轮次上限（如 20 轮）。
+              </n-collapse-item>
+            </n-collapse>
           </n-card>
         </n-space>
       </n-gi>
@@ -96,20 +206,18 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { MenuOption } from 'naive-ui'
-import ApiMethod from '../components/ApiMethod.vue'
-import ApiParams from '../components/ApiParams.vue'
 
-const activeSection = ref('doc-overview')
+const activeSection = ref('doc-quickstart')
 
 const tocMenuOptions: MenuOption[] = [
-  { label: '功能概览', key: 'doc-overview' },
-  { label: '认证', key: 'doc-auth' },
-  { label: 'Agent 管理', key: 'doc-agents' },
-  { label: 'Bot 控制', key: 'doc-bot' },
-  { label: '通知管理', key: 'doc-notify' },
-  { label: '会话管理', key: 'doc-sessions' },
-  { label: '配置管理', key: 'doc-config' },
-  { label: '监控', key: 'doc-monitor' },
+  { label: '🚀 快速上手', key: 'doc-quickstart' },
+  { label: '💬 微信命令', key: 'doc-commands' },
+  { label: '🤖 Agent 类型', key: 'doc-agent-types' },
+  { label: '📝 会话管理', key: 'doc-sessions' },
+  { label: '📢 通知与 Webhook', key: 'doc-notify' },
+  { label: '🔌 WS Agent 状态', key: 'doc-ws-status' },
+  { label: '💾 配置备份', key: 'doc-backup' },
+  { label: '❓ 常见问题', key: 'doc-faq' },
 ]
 
 function scrollToSection(key: string) {
@@ -117,16 +225,4 @@ function scrollToSection(key: string) {
   const el = document.getElementById(key)
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
-
-// 参数定义
-const authLoginParams = [{ name: 'password', type: 'string', required: true, desc: '管理密码' }]
-const authSetupParams = [{ name: 'password', type: 'string', required: true, desc: '管理密码（≥4位）' }]
-const authChangeParams = [
-  { name: 'oldPassword', type: 'string', required: true, desc: '当前密码' },
-  { name: 'newPassword', type: 'string', required: true, desc: '新密码（≥4位）' },
-]
-const sessionDetailParams = [
-  { name: 'userId', type: 'string', required: true, desc: '用户 ID（query）' },
-  { name: 'agentId', type: 'string', required: true, desc: 'Agent ID（query）' },
-]
 </script>

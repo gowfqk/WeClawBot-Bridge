@@ -97,7 +97,7 @@ const menuOptions: MenuOption[] = [
   { label: '通知管理', key: '/notify', icon: renderIcon(NotificationsOutline) },
   { label: '会话管理', key: '/sessions', icon: renderIcon(ChatbubblesOutline) },
   { label: '设置', key: '/settings', icon: renderIcon(SettingsOutline) },
-  { label: 'API 参考', key: '/api', icon: renderIcon(BookOutline) },
+  { label: '使用说明', key: '/api', icon: renderIcon(BookOutline) },
 ]
 
 const currentRoute = computed(() => route.path)
