@@ -550,7 +550,7 @@ export class AgentRegistry {
     }
 
     try {
-      return await this.wsAgentServer.invoke(agentId, payload)
+      return await this.wsAgentServer.invoke(agentId, payload, agent.timeout || 60000)
     } catch (err) {
       const error = err as Error
       if (error.message.includes('超时')) {
