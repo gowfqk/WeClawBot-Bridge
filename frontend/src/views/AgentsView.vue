@@ -567,30 +567,30 @@ async function handleSubmit() {
       message.success('Agent 已更新')
     } else {
       await api.post('/api/agents', payload)
-      // ws-remote 类型：自动生成 token + 安装命令
+      // ws-remote 类型：自动生成 token（仅当未手动生成时）
       if (payload.type === 'ws-remote' && payload.id) {
-        try {
-          const res = await api.post<{ agentId: string; token: string }>(`/api/ws-agents/${payload.id}/token`)
-          form.value.apiKey = res.token
-          wsLastAgentId.value = payload.id
-          wsLastToken.value = res.token
-          wsInstallCmd.value = buildInstallCmd(payload.id, res.token, payload.name, payload.command, wsPluginTemplate.value)
-          message.success('Agent 已添加，Token 已自动生成！复制下方命令到 Agent 端即可接入')
-        } catch {
-          message.success('Agent 已添加，但 Token 自动生成失败，请手动点击「生成 Token」')
+        const alreadyHasToken = form.value.apiKey && form.value.apiKey.startsWith('wsk_')
+        if (!alreadyHasToken) {
+          // 没有 token 或 token 未变 → 自动生成
+          try {
+            const res = await api.post<{ agentId: string; token: string }>(`/api/ws-agents/${payload.id}/token`)
+            form.value.apiKey = res.token
+            wsLastAgentId.value = payload.id
+            wsLastToken.value = res.token
+            wsInstallCmd.value = buildInstallCmd(payload.id, res.token, payload.name, payload.command, wsPluginTemplate.value)
+            message.success('Agent 已添加，Token 已自动生成！复制下方命令到 Agent 端即可接入')
+          } catch {
+            message.success('Agent 已添加，但 Token 自动生成失败，请手动点击「生成 Token」')
+          }
+        } else {
+          message.success('Agent 已添加')
         }
       } else {
         message.success('Agent 已添加')
       }
     }
-    // ws-remote 创建后保留表单（显示安装命令），其他类型关闭
-    if (payload.type === 'ws-remote' && !editingId.value) {
-      // 不调 cancelEdit，保留表单让用户看到安装命令
-      await loadAgents()
-    } else {
-      cancelEdit()
-      await loadAgents()
-    }
+    cancelEdit()
+    await loadAgents()
   } catch (e: any) {
     message.error(e.message)
   }
