@@ -106,6 +106,39 @@ agent.connect()
 
 用户在微信发 `#claude` 切换到该 Agent，之后所有消息都路由到你的 AI。
 
+### 方式三：CLI 工具接入（Claude Code / OpenCode / Codex）
+
+如果你想把本地 CLI 工具（Claude Code、OpenCode、Codex）接入微信，使用 `onMessage` 模式 spawn 命令行：
+
+**Claude Code：**
+```typescript
+import { WeClawBotAgent } from 'weclawbot-agent-plugin'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+
+const agent = new WeClawBotAgent({
+  bridgeUrl: 'wss://bridge/ws/agent',
+  agentId: 'claude-code', token: 'wsk_xxx',
+  name: 'Claude Code', command: 'cc',
+})
+
+agent.onMessage(async (msg) => {
+  const { stdout } = await promisify(execFile)(
+    'claude', ['-p', msg.text, '--output-format', 'text'],
+    { timeout: 120000 }
+  )
+  return { text: stdout.trim() }
+})
+
+agent.connect()
+```
+
+**OpenCode：** 把上面 `claude` 改成 `opencode`，参数改为 `['run', msg.text]`
+
+**Codex：** 把上面 `claude` 改成 `codex`，参数改为 `['exec', msg.text]`，超时建议 300000。
+
+> 管理面板生成 Token 时可选择模板，自动生成对应脚本。
+
 ## API
 
 ### `new WeClawBotAgent(config, onStatusChange?)`

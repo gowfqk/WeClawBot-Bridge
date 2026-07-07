@@ -8,7 +8,7 @@
 - **OpenAI 兼容**：HTTP Agent 支持 OpenAI 格式（填 base URL 即可），自动补全 `/chat/completions`，支持流式 SSE 输出
 - **WS Remote Agent（插件接入）**：AI Agent 通过 `weclawbot-agent-plugin` SDK 主动连接 Bridge，无需起 HTTP 服务；Token 自动生成 + 持久化，Bridge 重启不丢失
 - **Vision 支持**：可将微信图片以 base64 `image_url` 方式传给支持视觉的模型
-- **CLI Agent**：将本地命令行工具（如 `claude`、Python 脚本）直接接入微信，支持持久会话与哨兵结束符
+- **CLI Agent**：将本地命令行工具（如 `claude`、`codex`、`opencode`）直接接入微信，支持持久会话与哨兵结束符
 - **会话管理**：自动维护每用户 × 每 Agent 的对话历史，可配置最大轮次和过期时间；Web 面板支持查看/删除/清空会话，默认永不过期
 - **自动刷新二维码**：微信登录二维码过期后自动重新获取，管理面板实时显示刷新状态
 - **Webhook**：外部程序（GitHub Actions 等）无需 userId，Bot 在线即可推送消息到微信
@@ -91,7 +91,7 @@ PORT=5000 npm run dev
 | 命令 | `claude` |
 | 类型 | WS Remote (插件接入) |
 
-添加后点击「生成 Token」，复制安装命令到 Agent 端即可接入。详见 [agent-plugin/README.md](agent-plugin/README.md)。
+添加后点击「生成 Token」，选择模板（AI Backend / Claude Code / OpenCode / Codex），复制安装命令到 Agent 端即可接入。Token 保存后可随时通过列表「Token」按钮查看。详见 [agent-plugin/README.md](agent-plugin/README.md)。
 
 ### 6. 微信中使用
 
@@ -167,6 +167,7 @@ docker run -d \
 | POST | `/api/agents/:id/test` | 测试 Agent 调用 |
 | GET | `/api/ws-agents` | 列出在线 WS Remote Agent |
 | POST | `/api/ws-agents/:id/token` | 生成/刷新 Agent Token |
+| GET | `/api/ws-agents/:id/token` | 查看已有 Token |
 | GET | `/api/sessions` | 列出所有会话 |
 | GET | `/api/sessions/detail` | 查看会话详情（含对话历史） |
 | DELETE | `/api/sessions/clear` | 删除指定会话或清空全部 |
