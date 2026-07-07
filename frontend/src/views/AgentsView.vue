@@ -335,6 +335,7 @@ const wsPluginTemplateOptions = [
   { label: 'AI Backend（零代码）', value: 'aibackend' },
   { label: 'Claude Code', value: 'claude-code' },
   { label: 'OpenCode', value: 'opencode' },
+  { label: 'Codex', value: 'codex' },
 ]
 
 // WS Remote: 查看已有 Token
@@ -410,6 +411,35 @@ function buildInstallCmd(agentId: string, token: string, name?: string, command?
       `  const { stdout } = await execAsync('opencode',`,
       `    ['run', msg.text],`,
       `    { timeout: 120000, maxBuffer: 10*1024*1024 })`,
+      `  return { text: stdout.trim() || '(无输出)' }`,
+      `})`,
+      ``,
+      `agent.connect()`,
+    ].join('\n')
+  }
+
+  if (template === 'codex') {
+    return [
+      `npm install weclawbot-agent-plugin`,
+      ``,
+      `// agent-codex.js — 保存此文件后 node agent-codex.js 启动`,
+      `const { WeClawBotAgent } = require('weclawbot-agent-plugin')`,
+      `const { execFile } = require('child_process')`,
+      `const { promisify } = require('util')`,
+      `const execAsync = promisify(execFile)`,
+      ``,
+      `const agent = new WeClawBotAgent({`,
+      `  bridgeUrl: '${bridgeUrl}',`,
+      `  agentId: '${agentId}',`,
+      `  token: '${token}',`,
+      `  name: '${agentName}',`,
+      `  command: '${agentCmd}',`,
+      `}, (s) => console.log('状态:', s))`,
+      ``,
+      `agent.onMessage(async (msg) => {`,
+      `  const { stdout } = await execAsync('codex',`,
+      `    ['exec', msg.text],`,
+      `    { timeout: 300000, maxBuffer: 10*1024*1024 })`,
       `  return { text: stdout.trim() || '(无输出)' }`,
       `})`,
       ``,
