@@ -39,6 +39,10 @@ export class BotManager {
         polling: false,
       }
       this.startKeepalive()
+      // 登录后启动消息轮询
+      this.start().catch((err) => {
+        log.error({ err }, 'Failed to start polling after login')
+      })
     })
 
     this.bot.on('session:expired', () => {
@@ -63,6 +67,12 @@ export class BotManager {
         polling: false,
       }
       this.startKeepalive()
+      // 恢复 session 后启动消息轮询
+      this.start().then(() => {
+        log.info('Message polling started after session restore')
+      }).catch((err) => {
+        log.error({ err }, 'Failed to start polling after session restore')
+      })
     })
   }
 
