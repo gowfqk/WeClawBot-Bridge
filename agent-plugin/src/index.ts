@@ -244,10 +244,11 @@ export class WeClawBotAgent {
       }
 
       case 'auth_fail': {
-        console.error(`[WeClawBot] ❌ 认证失败: ${msg.reason}`)
+        console.error(`[WeClawBot] ❌ 认证失败: ${msg.reason}，稍后重连`)
         this.cleanup()
         this.ws?.close(4003, 'auth failed')
-        this.setStatus('failed')
+        this.setStatus('reconnecting')
+        this.scheduleReconnect()
         break
       }
 
@@ -459,17 +460,12 @@ export class WeClawBotAgent {
   }
 
   private scheduleReconnect(): void {
-    const maxAttempts = this.config.maxReconnectAttempts ?? Infinity
-    if (this.reconnectAttempts >= maxAttempts) {
-      console.error(`[WeClawBot] 达到最大重连次数 (${this.reconnectAttempts})，停止重连`)
-      this.setStatus('failed')
-      return
-    }
-
+    // 无限重连：不设上限
     if (this.reconnectTimer) return
 
     this.reconnectAttempts++
     const baseInterval = this.config.reconnectInterval ?? 3000
+    // 指数退避：3s → 6s → 12s → ... → 最多 60s
     const delay = Math.min(baseInterval * Math.pow(2, this.reconnectAttempts - 1), 60000)
 
     console.log(`[WeClawBot] ${delay / 1000}s 后重连 (第 ${this.reconnectAttempts} 次)...`)
