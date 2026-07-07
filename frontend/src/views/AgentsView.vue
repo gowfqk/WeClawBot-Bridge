@@ -408,7 +408,7 @@ function buildInstallCmd(agentId: string, token: string, name?: string, command?
       ``,
       `agent.onMessage(async (msg) => {`,
       `  const { stdout } = await execAsync('opencode',`,
-      `    [msg.text],`,
+      `    ['run', msg.text],`,
       `    { timeout: 120000, maxBuffer: 10*1024*1024 })`,
       `  return { text: stdout.trim() || '(无输出)' }`,
       `})`,
