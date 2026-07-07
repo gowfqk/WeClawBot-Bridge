@@ -9,7 +9,7 @@ const DEFAULT_SENTINEL = '__WCBOT_END__'
 
 /** 允许的 CLI 命令白名单（可扩展） */
 const ALLOWED_COMMANDS = new Set([
-  'claude', 'python3', 'python', 'node', 'bash', 'sh', 'git', 'curl', 'make',
+  'claude', 'codex', 'opencode', 'python3', 'python', 'node', 'bash', 'sh', 'git', 'curl', 'make',
 ])
 
 /** 验证 CLI 命令是否在白名单中 */
