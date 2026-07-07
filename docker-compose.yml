@@ -1,6 +1,6 @@
 services:
   weclawbot:
-    build: .
+    image: ghcr.io/gowfqk/weclawbot-bridge:latest
     container_name: weclawbot-bridge
     restart: unless-stopped
     ports:
