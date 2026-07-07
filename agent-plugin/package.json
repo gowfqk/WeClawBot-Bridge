@@ -1,6 +1,6 @@
 {
   "name": "weclawbot-agent-plugin",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "WeClawBot Agent 插件 SDK — 让 AI Agent 主动连接 WeClawBot-Bridge",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
