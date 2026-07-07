@@ -164,6 +164,34 @@
         </n-card>
       </n-space>
     </n-card>
+
+    <!-- Token 查看弹窗 -->
+    <n-modal v-model:show="tokenModalVisible" preset="card" title="Agent Token" style="max-width: 600px" :mask-closable="true" @update:show="(v: boolean) => { if (!v) tokenModalAgent = null }">
+      <n-spin :show="tokenModalLoading">
+        <template v-if="tokenModalAgent && tokenModalValue">
+          <n-descriptions :column="1" label-placement="left" size="small" bordered>
+            <n-descriptions-item label="Agent ID">
+              <n-code>{{ tokenModalAgent.id }}</n-code>
+            </n-descriptions-item>
+            <n-descriptions-item label="Token">
+              <n-input-group>
+                <n-input :value="tokenModalValue" readonly />
+                <n-button type="primary" @click="copyTokenToClipboard">
+                  📋
+                </n-button>
+              </n-input-group>
+            </n-descriptions-item>
+            <n-descriptions-item label="Bridge 地址">
+              <n-code>{{ bridgeWsUrl }}</n-code>
+            </n-descriptions-item>
+          </n-descriptions>
+          <n-button type="primary" block style="margin-top: 16px" @click="copyTokenModalCmd">
+            📋 复制完整安装命令
+          </n-button>
+        </template>
+        <n-empty v-else-if="!tokenModalLoading" description="未找到 Token，请先生成" />
+      </n-spin>
+    </n-modal>
   </div>
 </template>
 
@@ -272,9 +300,12 @@ const columns: DataTableColumns<Agent> = [
   },
   { title: '描述', key: 'description', ellipsis: { tooltip: true } },
   {
-    title: '操作', key: 'actions', width: 160,
+    title: '操作', key: 'actions', width: 220,
     render: (row) =>
       h(NSpace, { size: 'small' }, () => [
+        row.type === 'ws-remote'
+          ? h(NButton, { size: 'small', quaternary: true, type: 'info', onClick: () => showTokenModal(row) }, () => 'Token')
+          : null,
         h(NButton, { size: 'small', quaternary: true, type: 'primary', onClick: () => startEdit(row) }, () => '编辑'),
         h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => confirmDelete(row) }, () => '删除'),
       ]),
@@ -294,6 +325,71 @@ const testResult = ref<{ text: string; elapsed: number } | null>(null)
 const tokenGenerating = ref(false)
 const wsInstallCmd = ref('')
 
+// WS Remote: 查看已有 Token
+const tokenModalAgent = ref<Agent | null>(null)
+const tokenModalVisible = ref(false)
+const tokenModalLoading = ref(false)
+const tokenModalValue = ref('')
+
+const bridgeWsUrl = computed(() =>
+  `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/agent`
+)
+
+function copyTokenToClipboard() {
+  navigator.clipboard.writeText(tokenModalValue.value).then(
+    () => message.success('Token 已复制'),
+    () => message.error('复制失败'),
+  )
+}
+
+function buildInstallCmd(agentId: string, token: string, name?: string, command?: string): string {
+  const bridgeUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/agent`
+  return [
+    `npm install weclawbot-agent-plugin`,
+    ``,
+    `node -e "`,
+    `const { WeClawBotAgent } = require('weclawbot-agent-plugin');`,
+    `const agent = new WeClawBotAgent({`,
+    `  bridgeUrl: '${bridgeUrl}',`,
+    `  agentId: '${agentId}',`,
+    `  token: '${token}',`,
+    `  name: '${name || agentId}',`,
+    `  command: '${command || agentId}',`,
+    `  aiBackend: {`,
+    `    url: 'http://127.0.0.1:8642/v1',`,
+    `    apiKey: 'your-api-key',`,
+    `    format: 'openai',`,
+    `  },`,
+    `}, (status) => console.log('状态:', status));`,
+    `agent.connect();`,
+    `"`,
+  ].join('\n')
+}
+
+async function showTokenModal(agent: Agent) {
+  tokenModalAgent.value = agent
+  tokenModalVisible.value = true
+  tokenModalValue.value = ''
+  tokenModalLoading.value = true
+  try {
+    const res = await api.get<{ agentId: string; token: string }>(`/api/ws-agents/${agent.id}/token`)
+    tokenModalValue.value = res.token
+  } catch {
+    tokenModalValue.value = ''
+  } finally {
+    tokenModalLoading.value = false
+  }
+}
+
+function copyTokenModalCmd() {
+  if (!tokenModalAgent.value || !tokenModalValue.value) return
+  const cmd = buildInstallCmd(tokenModalAgent.value.id, tokenModalValue.value)
+  navigator.clipboard.writeText(cmd).then(
+    () => message.success('安装命令已复制'),
+    () => message.error('复制失败'),
+  )
+}
+
 async function handleGenerateToken() {
   if (!form.value.id) {
     message.warning('请先填写 Agent ID')
@@ -301,32 +397,10 @@ async function handleGenerateToken() {
   }
   tokenGenerating.value = true
   try {
-    // 先确保 agent 已注册（如果还没提交过，先创建）
     const agentId = form.value.id
     const res = await api.post<{ agentId: string; token: string }>(`/api/ws-agents/${agentId}/token`)
     form.value.apiKey = res.token
-    // 生成安装命令
-    const bridgeUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/agent`
-    wsInstallCmd.value = [
-      `npm install weclawbot-agent-plugin`,
-      ``,
-      `node -e "`,
-      `const { WeClawBotAgent } = require('weclawbot-agent-plugin');`,
-      `const agent = new WeClawBotAgent({`,
-      `  bridgeUrl: '${bridgeUrl}',`,
-      `  agentId: '${agentId}',`,
-      `  token: '${res.token}',`,
-      `  name: '${form.value.name || agentId}',`,
-      `  command: '${form.value.command || agentId}',`,
-      `  aiBackend: {                    // 零代码：填好 AI 地址即可`,
-      `    url: 'http://127.0.0.1:8642/v1',  // 替换为你的 AI 端点`,
-      `    apiKey: 'your-api-key',        // 替换为你的 API Key`,
-      `    format: 'openai',             // openai | qwenpaw | native`,
-      `  },`,
-      `}, (status) => console.log('状态:', status));`,
-      `agent.connect();  // 无需 onMessage，aiBackend 自动处理`,
-      `"`,
-    ].join('\n')
+    wsInstallCmd.value = buildInstallCmd(agentId, res.token, form.value.name, form.value.command)
     message.success('Token 已生成，复制下方命令到 Agent 端即可接入')
   } catch (e: any) {
     message.error(e.message || 'Token 生成失败')
@@ -409,27 +483,7 @@ async function handleSubmit() {
         try {
           const res = await api.post<{ agentId: string; token: string }>(`/api/ws-agents/${payload.id}/token`)
           form.value.apiKey = res.token
-          const bridgeUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/agent`
-          wsInstallCmd.value = [
-            `npm install weclawbot-agent-plugin`,
-            ``,
-            `node -e "`,
-            `const { WeClawBotAgent } = require('weclawbot-agent-plugin');`,
-            `const agent = new WeClawBotAgent({`,
-            `  bridgeUrl: '${bridgeUrl}',`,
-            `  agentId: '${payload.id}',`,
-            `  token: '${res.token}',`,
-            `  name: '${payload.name || payload.id}',`,
-            `  command: '${payload.command || payload.id}',`,
-            `  aiBackend: {                    // 零代码：填好 AI 地址即可`,
-            `    url: 'http://127.0.0.1:8642/v1',  // 替换为你的 AI 端点`,
-            `    apiKey: 'your-api-key',        // 替换为你的 API Key`,
-            `    format: 'openai',             // openai | qwenpaw | native`,
-            `  },`,
-            `}, (status) => console.log('状态:', status));`,
-            `agent.connect();  // 无需 onMessage，aiBackend 自动处理`,
-            `"`,
-          ].join('\n')
+          wsInstallCmd.value = buildInstallCmd(payload.id, res.token, payload.name, payload.command)
           message.success('Agent 已添加，Token 已自动生成！复制下方命令到 Agent 端即可接入')
         } catch {
           message.success('Agent 已添加，但 Token 自动生成失败，请手动点击「生成 Token」')

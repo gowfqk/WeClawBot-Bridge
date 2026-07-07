@@ -613,6 +613,21 @@ export function createServer(
     res.json({ agentId, token })
   })
 
+  // 查看已有 Token（不重新生成）
+  app.get('/api/ws-agents/:id/token', dynamicAuth, (req, res) => {
+    if (!wsAgentServer) {
+      res.status(503).json({ error: 'WS Agent Server 未启用' })
+      return
+    }
+    const agentId = req.params.id as string
+    const token = wsAgentServer.getAgentToken(agentId)
+    if (token) {
+      res.json({ agentId, token })
+    } else {
+      res.status(404).json({ error: 'Token 不存在，请先生成' })
+    }
+  })
+
   app.post('/api/notify', dynamicAuth, async (req, res) => {
     try {
       const { content } = req.body
