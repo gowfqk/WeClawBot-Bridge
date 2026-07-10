@@ -85,15 +85,18 @@ async function main(): Promise<void> {
     storage: rawStorage,
     onAgentConnect: (agentId, info) => {
       logger.info({ agentId, name: info.name, command: info.command }, 'WS Agent 已上线')
-      // 动态注册为 ws-remote 类型 Agent
+      // 动态注册为 ws-remote 类型 Agent。保留面板里已配置的 timeout/model 等字段，
+      // 避免 Agent 重连后把自定义配置重置为默认值。
+      const existing = agentRegistry.get(agentId)
       agentRegistry.register({
+        ...existing,
         id: agentId,
-        name: info.name,
-        command: info.command,
+        name: info.name || existing?.name || agentId,
+        command: info.command || existing?.command || agentId,
         type: 'ws-remote',
-        description: info.description || `WebSocket 远程 Agent (${info.name})`,
-        timeout: 60000,
-        model: info.model,
+        description: info.description || existing?.description || `WebSocket 远程 Agent (${info.name || agentId})`,
+        timeout: existing?.timeout ?? 60000,
+        model: info.model ?? existing?.model,
       })
       commandHandler.updateAgents(agentRegistry.listAll())
     },

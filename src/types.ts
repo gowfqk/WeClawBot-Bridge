@@ -93,7 +93,7 @@ export interface NotificationRule {
   type: 'cron' | 'event'
   schedule?: string
   event?: string
-  userId: string
+  userId?: string
   content: SendContent
 }
 

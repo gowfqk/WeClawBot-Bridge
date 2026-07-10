@@ -114,14 +114,8 @@ export class BotManager {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         await this.login(onQrUrl)
-        log.info('Bot logged in, starting message polling...')
-        this.isStarted = true
-        this.status.polling = true
-        this.bot.start().catch((err) => {
-          log.error({ err }, 'Poller crashed')
-          this.status.polling = false
-          this.isStarted = false
-        })
+        log.info('Bot logged in, ensuring message polling is started...')
+        await this.start()
         return
       } catch (err) {
         const error = err as Error

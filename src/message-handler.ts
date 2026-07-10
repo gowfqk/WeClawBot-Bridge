@@ -4,6 +4,7 @@ import type { AgentRegistry } from './agent-registry'
 import type { SessionManager } from './session-manager'
 import type { BotManager } from './bot-manager'
 import { createLogger } from './logger'
+import { normalizeUserId } from './single-user'
 
 const log = createLogger('message-handler')
 import type { ChatEntry } from './types'
@@ -25,7 +26,9 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
     raw: unknown
   }): Promise<void> => {
     const { commandHandler, userState, agentRegistry, sessionManager, botManager } = ctx
-    const { userId, text, type, raw } = msg
+    const { userId: senderId, text, type, raw } = msg
+    // 单用户设计：真实微信 senderId 只用于回消息/typing；业务状态和会话统一归到 default。
+    const userId = normalizeUserId(senderId)
 
     const reply = async (text: string) => {
       await botManager.sendReply(raw, { text })
@@ -83,7 +86,7 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
         return
       }
 
-      await botManager.sendTyping(userId)
+      await botManager.sendTyping(senderId)
 
       const session = await sessionManager.getOrCreate(userId, currentAgentId)
 

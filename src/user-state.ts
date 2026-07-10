@@ -1,4 +1,5 @@
 import type { Storage, UserState } from './types'
+import { normalizeUserId } from './single-user'
 
 const STATE_KEY_PREFIX = 'user:'
 const STATE_KEY_SUFFIX = ':state'
@@ -13,15 +14,16 @@ export class UserStateManager {
   }
 
   private stateKey(userId: string): string {
-    return `${STATE_KEY_PREFIX}${userId}${STATE_KEY_SUFFIX}`
+    return `${STATE_KEY_PREFIX}${normalizeUserId(userId)}${STATE_KEY_SUFFIX}`
   }
 
   async getState(userId: string): Promise<UserState> {
-    const existing = await this.storage.get<UserState>(this.stateKey(userId))
+    const normalizedUserId = normalizeUserId(userId)
+    const existing = await this.storage.get<UserState>(this.stateKey(normalizedUserId))
     if (existing) return existing
 
     return {
-      userId,
+      userId: normalizedUserId,
       currentAgentId: this.defaultAgentId || null,
       lastActive: Date.now(),
     }

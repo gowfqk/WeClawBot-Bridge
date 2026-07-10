@@ -110,7 +110,7 @@
 
           <!-- 会话管理 -->
           <n-card id="doc-sessions" title="📝 会话管理">
-            <n-text>每个微信用户 × 每个 Agent 独立维护对话历史：</n-text>
+            <n-text>单用户模式下，每个 Agent 独立维护对话历史：</n-text>
             <n-ul style="margin-top: 12px">
               <n-li>切换 Agent 不清空上下文，回到之前的 Agent 继续对话</n-li>
               <n-li>会话管理页面可查看所有会话列表与完整对话详情</n-li>
@@ -176,9 +176,9 @@
                 插件进程未运行或网络不通。检查插件端是否已 connect()，确认 Bridge 地址可达。
                 插件会自动重连（指数退避），通常网络恢复后几秒内重新上线。
               </n-collapse-item>
-              <n-collapse-item title="如何让多个微信用户用不同的 Agent？" name="multi">
-                每个用户独立维护当前 Agent 和会话历史。用户 A 切换到 #hermes，
-                用户 B 切换到 #qc，互不影响。
+              <n-collapse-item title="多个微信号发消息会怎样？" name="multi">
+                当前设计是单用户模式：所有微信入口共享当前 Agent 和会话历史。真实微信用户 ID 只用于回复当前消息，
+                不再为不同发送者维护独立上下文。
               </n-collapse-item>
               <n-collapse-item title="对话历史会占很多内存吗？" name="memory">
                 可在会话管理页面设置最大轮次和过期时间。默认不限制轮次、永不过期。

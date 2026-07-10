@@ -166,7 +166,7 @@ agent.onMessage(async (msg: IncomingMessage) => {
   // msg.id       - 请求 ID
   // msg.text     - 用户消息文本
   // msg.type     - 消息类型 ('text')
-  // msg.userId   - 微信用户 ID
+  // msg.userId   - 会话用户 ID（单用户模式下通常为 default）
   // msg.agentId  - Agent ID
   // msg.history  - 对话历史 [{role, content}]
 

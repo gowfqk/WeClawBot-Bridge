@@ -53,14 +53,13 @@
       <n-gi v-if="selectedSession">
         <n-card>
           <template #header>
-            <span>会话详情：{{ selectedSession.userId }} / {{ selectedSession.agentId }}</span>
+            <span>会话详情：{{ selectedSession.agentId }}</span>
           </template>
           <template #header-extra>
             <n-button size="small" @click="selectedSession = null">关闭</n-button>
           </template>
 
           <n-descriptions bordered :column="2" style="margin-bottom: 16px">
-            <n-descriptions-item label="用户 ID">{{ selectedSession.userId }}</n-descriptions-item>
             <n-descriptions-item label="Agent">{{ selectedSession.agentId }}</n-descriptions-item>
             <n-descriptions-item label="消息数">{{ selectedSession.history?.length || 0 }}</n-descriptions-item>
             <n-descriptions-item label="最后活跃">
@@ -133,7 +132,6 @@ const expireOptions = [
 ]
 
 const sessionColumns: DataTableColumns<SessionInfo> = [
-  { title: '用户 ID', key: 'userId', width: 150 },
   { title: 'Agent', key: 'agentId', width: 140 },
   {
     title: '消息数', key: 'history', width: 90,
@@ -190,7 +188,7 @@ async function saveConfig() {
 async function viewDetail(session: SessionInfo) {
   try {
     const detail = await api.get<SessionInfo>(
-      `/api/sessions/detail?userId=${encodeURIComponent(session.userId)}&agentId=${encodeURIComponent(session.agentId)}`,
+      `/api/sessions/detail?agentId=${encodeURIComponent(session.agentId)}`,
     )
     selectedSession.value = detail
   } catch (e: any) {
@@ -201,12 +199,12 @@ async function viewDetail(session: SessionInfo) {
 function confirmDelete(session: SessionInfo) {
   dialog.warning({
     title: '确认删除',
-    content: `确定要删除用户 "${session.userId}" 与 Agent "${session.agentId}" 的会话吗？`,
+    content: `确定要删除 Agent "${session.agentId}" 的会话吗？`,
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: async () => {
       try {
-        await api.post('/api/sessions/clear', { userId: session.userId, agentId: session.agentId })
+        await api.post('/api/sessions/clear', { agentId: session.agentId })
         message.success('已删除')
         selectedSession.value = null
         await loadSessions()

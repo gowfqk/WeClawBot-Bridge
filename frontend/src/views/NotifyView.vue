@@ -70,9 +70,6 @@
         <n-form-item v-if="ruleForm.type === 'event'" label="事件">
           <n-input v-model:value="ruleForm.event" placeholder="事件名称" />
         </n-form-item>
-        <n-form-item label="用户 ID">
-          <n-input v-model:value="ruleForm.userId" placeholder="接收通知的用户" />
-        </n-form-item>
         <n-form-item label="内容">
           <n-input v-model:value="ruleForm.contentText" type="textarea" placeholder="通知内容" :rows="3" />
         </n-form-item>
@@ -93,7 +90,7 @@ interface NotifyRule {
   type: 'cron' | 'event'
   schedule?: string
   event?: string
-  userId: string
+  userId?: string
   content: { text?: string }
 }
 
@@ -122,7 +119,6 @@ const ruleForm = ref({
   type: 'cron' as 'cron' | 'event',
   schedule: '',
   event: '',
-  userId: '',
   contentText: '',
 })
 
@@ -138,7 +134,7 @@ const ruleColumns: DataTableColumns<NotifyRule> = [
     render: (row) => h(NTag, { type: row.type === 'cron' ? 'info' : 'warning', size: 'small', round: true }, () => row.type),
   },
   { title: '调度/事件', key: 'schedule', width: 140, render: (row) => row.schedule || row.event || '-' },
-  { title: '用户', key: 'userId', width: 120 },
+  { title: '接收对象', key: 'userId', width: 120, render: () => '默认用户' },
   { title: '内容', key: 'content', ellipsis: { tooltip: true }, render: (row) => row.content?.text || '-' },
   {
     title: '操作', key: 'actions', width: 80,
@@ -151,7 +147,7 @@ const ruleColumns: DataTableColumns<NotifyRule> = [
 ]
 
 const logColumns: DataTableColumns<NotifyLog> = [
-  { title: '用户', key: 'userId', width: 120 },
+  { title: '接收对象', key: 'userId', width: 120, render: () => '默认用户' },
   { title: '内容', key: 'content', ellipsis: { tooltip: true }, render: (row) => row.content?.text || '-' },
   {
     title: '状态', key: 'status', width: 80,
@@ -224,12 +220,11 @@ async function handleAddRule() {
       type: ruleForm.value.type,
       schedule: ruleForm.value.type === 'cron' ? ruleForm.value.schedule : undefined,
       event: ruleForm.value.type === 'event' ? ruleForm.value.event : undefined,
-      userId: ruleForm.value.userId,
       content: { text: ruleForm.value.contentText },
     })
     message.success('规则已添加')
     showAddRule.value = false
-    ruleForm.value = { id: '', type: 'cron', schedule: '', event: '', userId: '', contentText: '' }
+    ruleForm.value = { id: '', type: 'cron', schedule: '', event: '', contentText: '' }
     loadRules()
   } catch (e: any) {
     message.error(e.message)

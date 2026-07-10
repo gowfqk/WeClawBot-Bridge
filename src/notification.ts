@@ -22,11 +22,19 @@ export class NotificationService {
     this.storage = storage
   }
 
-  async send(userId: string, content: SendContent): Promise<void> {
+  private resolveRecipient(userId?: string): string {
+    if (userId) return userId
+    const status = this.botManager.getStatus()
+    if (status.loggedIn && status.currentUser) return status.currentUser
+    throw new Error('Bot 未登录，无法发送通知')
+  }
+
+  async send(userId: string | undefined, content: SendContent): Promise<void> {
+    const recipient = this.resolveRecipient(userId)
     const logId = crypto.randomUUID()
     const log: NotificationLog = {
       id: logId,
-      userId,
+      userId: recipient,
       content,
       status: 'success',
       timestamp: Date.now(),
@@ -36,7 +44,7 @@ export class NotificationService {
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        await this.botManager.send(userId, content)
+        await this.botManager.send(recipient, content)
         log.status = 'success'
         delete log.error
         await this.storage.set(`notify:log:${logId}`, log)

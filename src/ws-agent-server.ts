@@ -186,7 +186,7 @@ export class WsAgentServer {
       ws.on('close', (code, reason) => {
         clearTimeout(authTimer)
         if (agentId) {
-          this.removeConnection(agentId, `连接关闭 (${code}: ${reason.toString() || 'no reason'})`)
+          this.removeConnection(agentId, `连接关闭 (${code}: ${reason.toString() || 'no reason'})`, ws)
         }
       })
 
@@ -329,6 +329,8 @@ export class WsAgentServer {
         clearTimeout(pending.timer)
         pending.reject(new Error('连接被替换'))
       }
+      // Delete only before installing the new connection. The old socket's later
+      // close event must not remove the replacement connection.
       this.connections.delete(agentId)
     }
 
@@ -399,9 +401,13 @@ export class WsAgentServer {
     }
   }
 
-  private removeConnection(agentId: string, reason: string): void {
+  private removeConnection(agentId: string, reason: string, ws?: WebSocket): void {
     const conn = this.connections.get(agentId)
     if (!conn) return
+    if (ws && conn.ws !== ws) {
+      log.info({ agentId, reason }, '忽略旧 WS 连接关闭事件，当前连接已被替换')
+      return
+    }
 
     log.info({ agentId, reason }, 'WS Agent 断开连接')
 

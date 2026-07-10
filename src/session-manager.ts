@@ -1,4 +1,5 @@
 import type { Storage, Session, ChatEntry } from './types'
+import { SINGLE_USER_ID, normalizeUserId } from './single-user'
 
 const SESSION_KEY_PREFIX = 'session:'
 const CONTEXT_TOKEN_KEY_PREFIX = 'context_token:'
@@ -47,15 +48,16 @@ export class SessionManager {
   }
 
   private sessionKey(userId: string, agentId: string): string {
-    return `${SESSION_KEY_PREFIX}${userId}:${agentId}`
+    return `${SESSION_KEY_PREFIX}${normalizeUserId(userId)}:${agentId}`
   }
 
   private contextTokenKey(userId: string): string {
-    return `${CONTEXT_TOKEN_KEY_PREFIX}${userId}`
+    return `${CONTEXT_TOKEN_KEY_PREFIX}${normalizeUserId(userId)}`
   }
 
   async getOrCreate(userId: string, agentId: string): Promise<Session> {
-    const key = this.sessionKey(userId, agentId)
+    const normalizedUserId = normalizeUserId(userId)
+    const key = this.sessionKey(normalizedUserId, agentId)
     
     // 检查缓存
     const cached = this.cache.get(key)
@@ -73,7 +75,7 @@ export class SessionManager {
       session.lastActive = Date.now()
     } else {
       session = {
-        userId,
+        userId: normalizedUserId,
         agentId,
         history: [],
         contextToken: '',
@@ -153,7 +155,7 @@ export class SessionManager {
       // 跳过会话配置键
       if (key === 'session:config' || key === 'session_config' || key === SESSION_CONFIG_KEY) continue
       const session = await this.storage.get<Session>(key)
-      if (session && session.userId && session.agentId) {
+      if (session && session.userId === SINGLE_USER_ID && session.agentId) {
         sessions.push({
           userId: session.userId,
           agentId: session.agentId,

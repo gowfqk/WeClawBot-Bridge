@@ -17,6 +17,7 @@ import { loggingMiddleware } from './middleware/logging'
 import { SessionAuth } from './middleware/session-auth'
 import { csrfOriginMiddleware } from './middleware/csrf'
 import { getMetrics, botStatus } from './metrics'
+import { SINGLE_USER_ID, normalizeUserId } from './single-user'
 import {
   LoginSchema, SetupSchema, ChangePasswordSchema,
   AgentConfigSchema, NotifySchema, NotifyRuleSchema,
@@ -461,8 +462,8 @@ export function createServer(
         if (backup.sessions && backup.sessions.length > 0) {
           for (const session of backup.sessions) {
             const s = session as { userId?: string; agentId?: string }
-            if (s.userId && s.agentId) {
-              await storage.set(`session:${s.userId}:${s.agentId}`, session)
+            if (s.agentId) {
+              await storage.set(`session:${SINGLE_USER_ID}:${s.agentId}`, { ...(session as object), userId: SINGLE_USER_ID, agentId: s.agentId })
               storageCount++
             }
           }
@@ -576,13 +577,13 @@ export function createServer(
     try {
       const start = Date.now()
       // 使用临时会话进行测试，不持久化到存储
-      const tempSession = await sessionManager.getOrCreate('admin-test', agentId)
+      const tempSession = await sessionManager.getOrCreate(SINGLE_USER_ID, agentId)
       const response = await agentRegistry.invoke(agentId, {
         message: { text, type: 'text' },
-        session: { userId: 'admin-test', agentId, history: tempSession.history },
+        session: { userId: SINGLE_USER_ID, agentId, history: tempSession.history },
       })
       // 测试后清理临时会话，避免污染会话列表
-      await sessionManager.clear('admin-test', agentId)
+      await sessionManager.clear(SINGLE_USER_ID, agentId)
       res.json({
         text: response.reply.text,
         elapsed: Date.now() - start,
@@ -630,20 +631,9 @@ export function createServer(
 
   app.post('/api/notify', dynamicAuth, async (req, res) => {
     try {
-      const { content } = req.body
-      if (!content) {
-        res.status(400).json({ error: 'content is required' })
-        return
-      }
-      
-      // 自动使用当前登录的Bot用户作为收件人
-      const botStatus = botManager.getStatus()
-      if (!botStatus.loggedIn || !botStatus.currentUser) {
-        res.status(400).json({ error: 'Bot not logged in' })
-        return
-      }
-      
-      await notificationService.send(botStatus.currentUser, content)
+      const v = validate(NotifySchema, req.body)
+      if (!v.ok) { res.status(400).json({ error: v.error }); return }
+      await notificationService.send(v.data.userId, v.data.content)
       res.json({ ok: true })
     } catch (err) {
       const error = err as Error
@@ -702,19 +692,9 @@ export function createServer(
   app.post('/api/webhook', webhookAuth, async (req, res) => {
     try {
       const { userId, text, content } = req.body
-
-      // userId 可选；未提供时发给 Bot 当前登录账号（即管理员自己）
-      const botStatus = botManager.getStatus()
-      const recipient: string | null = userId || (botStatus.loggedIn ? (botStatus.currentUser ?? null) : null)
-
-      if (!recipient) {
-        res.status(503).json({ error: 'Bot 未登录，无法发送通知。请先扫码登录。' })
-        return
-      }
-
       const sendContent = content || { text: text || 'empty' }
-      await notificationService.send(recipient, sendContent)
-      res.json({ ok: true, recipient })
+      await notificationService.send(userId, sendContent)
+      res.json({ ok: true, recipient: userId || SINGLE_USER_ID })
     } catch (err) {
       const error = err as Error
       res.status(500).json({ error: error.message })
@@ -735,11 +715,11 @@ export function createServer(
   app.get('/api/sessions/detail', dynamicAuth, async (req, res) => {
     try {
       const { userId, agentId } = req.query
-      if (!userId || !agentId) {
-        res.status(400).json({ error: 'userId and agentId are required' })
+      if (!agentId) {
+        res.status(400).json({ error: 'agentId is required' })
         return
       }
-      const session = await sessionManager.getSessionDetail(userId as string, agentId as string)
+      const session = await sessionManager.getSessionDetail(normalizeUserId(userId as string | undefined), agentId as string)
       if (!session) {
         res.status(404).json({ error: 'Session not found' })
         return
@@ -754,9 +734,9 @@ export function createServer(
   app.delete('/api/sessions/clear', dynamicAuth, async (req, res) => {
     try {
       const { userId, agentId } = req.body
-      if (userId && agentId) {
-        // 删除指定会话
-        const deleted = await sessionManager.deleteSession(userId, agentId)
+      if (agentId) {
+        // 单用户设计：删除指定 Agent 的会话，忽略外部传入 userId。
+        const deleted = await sessionManager.deleteSession(normalizeUserId(userId), agentId)
         res.json({ ok: true, deleted })
       } else {
         // 清空所有会话

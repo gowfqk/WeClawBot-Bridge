@@ -52,7 +52,7 @@ export const AgentConfigSchema = z.object({
 
 /** 通知发送 */
 export const NotifySchema = z.object({
-  userId: z.string().min(1),
+  userId: z.string().min(1).optional(),
   content: z.object({
     text: z.string().min(1),
   }),
@@ -61,7 +61,7 @@ export const NotifySchema = z.object({
 /** 通知规则 */
 export const NotifyRuleSchema = z.object({
   id: z.string().min(1),
-  userId: z.string().min(1),
+  userId: z.string().min(1).optional(),
   content: z.object({
     text: z.string().min(1),
   }),

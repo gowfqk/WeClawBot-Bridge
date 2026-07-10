@@ -75,7 +75,7 @@ export interface IncomingMessage {
   text: string
   /** 消息类型 */
   type: string
-  /** 用户 ID */
+  /** 会话用户 ID（单用户模式下通常为 default） */
   userId: string
   /** Agent ID */
   agentId: string

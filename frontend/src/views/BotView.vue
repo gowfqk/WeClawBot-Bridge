@@ -13,7 +13,7 @@
             <n-descriptions-item label="账号">
               {{ botStatus.accountId || '-' }}
             </n-descriptions-item>
-            <n-descriptions-item label="当前用户">
+            <n-descriptions-item label="通知目标">
               {{ botStatus.currentUser || '-' }}
             </n-descriptions-item>
             <n-descriptions-item label="轮询状态">

@@ -186,7 +186,8 @@ export class AgentRegistry {
     }
 
     if (agent.model) body.model = agent.model
-    // api_key 不应放在请求体中，已通过 Authorization header 传递
+    // QwenPaw expects api_key in the request body; keep Authorization header too for compatibility.
+    if (agent.apiKey) body.api_key = agent.apiKey
     return body
   }
 
