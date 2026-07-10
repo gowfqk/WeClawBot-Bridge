@@ -383,15 +383,7 @@ export function createServer(
       const backup = {
         version: 2,
         exportedAt: new Date().toISOString(),
-        agents: agents.map(a => {
-          // safe=true 时脱敏 apiKey
-          const safe = (_req.query as Record<string,string>).safe === 'true'
-          if (safe && a.apiKey) {
-            const key = a.apiKey
-            return { ...a, apiKey: key.length > 8 ? key.slice(0,6) + '...' + key.slice(-2) : '***' }
-          }
-          return a
-        }),
+        agents, // 导出完整 Agent 配置（含 apiKey），用于迁移恢复
         defaultAgentId: config.defaultAgentId,
         session: sessionConfig,
         notifications: notifyRules,
