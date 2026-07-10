@@ -283,9 +283,15 @@ export function createServer(
   })
 
   app.get('/api/health', (_req, res) => {
+    const wsAgents = wsAgentServer ? wsAgentServer.getOnlineAgents().map(a => ({
+      id: a.agentId,
+      online: true,
+      lastActivity: a.lastActivity,
+    })) : []
     res.json({
       status: 'ok',
       bot: botManager.getStatus(),
+      wsAgents,
     })
   })
 
@@ -377,7 +383,15 @@ export function createServer(
       const backup = {
         version: 2,
         exportedAt: new Date().toISOString(),
-        agents, // 导出完整 Agent 配置（含 apiKey），用于迁移恢复
+        agents: agents.map(a => {
+          // safe=true 时脱敏 apiKey
+          const safe = (_req.query as Record<string,string>).safe === 'true'
+          if (safe && a.apiKey) {
+            const key = a.apiKey
+            return { ...a, apiKey: key.length > 8 ? key.slice(0,6) + '...' + key.slice(-2) : '***' }
+          }
+          return a
+        }),
         defaultAgentId: config.defaultAgentId,
         session: sessionConfig,
         notifications: notifyRules,
