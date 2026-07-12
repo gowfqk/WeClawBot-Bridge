@@ -26,7 +26,7 @@
         <n-card title="配置备份">
           <n-space vertical>
             <n-text depth="3" style="font-size: 13px">
-              导出所有 Agent 配置、会话设置和管理密码为 JSON 文件，可用于迁移或恢复。
+              导出完整 Agent 配置、会话策略和通知规则为易读 JSON 文件；不会导出会话记录、通知日志或管理密码。
             </n-text>
             <n-space>
               <n-button type="primary" :loading="exporting" @click="handleExport">
@@ -123,7 +123,7 @@ async function handleExport() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'weclawbot-backup.json'
+    a.download = 'weclawbot-config.json'
     a.click()
     URL.revokeObjectURL(url)
     message.success('配置已导出')

@@ -355,48 +355,21 @@ export function createServer(
       const sessionConfig = await sessionManager.getConfig()
       const notifyRules = notificationService.listRules()
 
-      // 导出全部存储数据
-      const allKeys = await storage.listKeys()
-      const storageDump: Record<string, unknown> = {}
-      for (const key of allKeys) {
-        // 跳过旧版明文密钥存储键（仅保留 bcrypt 哈希）
-        if (key === 'config:api_key') continue
-        const val = await storage.get(key)
-        if (val !== undefined) storageDump[key] = val
-      }
-
-      // 导出会话列表
-      const sessionKeys = allKeys.filter(k => k.startsWith('session:') && k !== 'session:config')
-      const sessions: unknown[] = []
-      for (const key of sessionKeys) {
-        const val = await storage.get(key)
-        if (val !== undefined) sessions.push(val)
-      }
-
-      // 导出通知日志
-      const notifyLogKeys = allKeys.filter(k => k.startsWith('notify:log:'))
-      const notifyLogs: unknown[] = []
-      for (const key of notifyLogKeys) {
-        const val = await storage.get(key)
-        if (val !== undefined) notifyLogs.push(val)
-      }
-
       const backup = {
-        version: 2,
+        version: 3,
         exportedAt: new Date().toISOString(),
-        agents, // 导出完整 Agent 配置（含 apiKey），用于迁移恢复
+        // Deliberately retain complete Agent credentials for migration, but exclude
+        // conversations, notification logs, and opaque storage records.
+        agents,
         defaultAgentId: config.defaultAgentId,
         session: sessionConfig,
         notifications: notifyRules,
-        sessions,
-        notifyLogs,
-        storageDump,
-        // 管理面板密码不导出，需重新设置
+        // 管理面板密码、会话记录和运行日志不导出，需重新设置/保留在原实例。
       }
 
-      res.setHeader('Content-Type', 'application/json')
-      res.setHeader('Content-Disposition', 'attachment; filename="weclawbot-backup.json"')
-      res.json(backup)
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.setHeader('Content-Disposition', 'attachment; filename="weclawbot-config.json"')
+      res.send(`${JSON.stringify(backup, null, 2)}\n`)
     } catch (err) {
       const error = err as Error
       res.status(500).json({ error: error.message })
