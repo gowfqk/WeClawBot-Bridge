@@ -55,6 +55,19 @@ describe('WS Agent token persistence', () => {
     expect(wsAgentServer.removeAgentToken).toHaveBeenCalledWith('2022')
   })
 
+  it('removes a stale WS token when an Agent changes away from ws-remote', () => {
+    const wsAgentServer = {
+      getAgentToken: vi.fn(),
+      setAgentToken: vi.fn(),
+      removeAgentToken: vi.fn(),
+      generateToken: vi.fn(),
+    }
+
+    syncWsAgentToken(wsRemoteAgent({ type: 'http', endpoint: 'https://example.test' }), wsAgentServer)
+
+    expect(wsAgentServer.removeAgentToken).toHaveBeenCalledWith('2022')
+  })
+
   it('stores a newly generated token in the Agent configuration', async () => {
     const wsAgentServer = {
       getAgentToken: vi.fn(),

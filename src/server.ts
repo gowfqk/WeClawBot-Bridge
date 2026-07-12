@@ -442,7 +442,7 @@ export function createServer(
       // v2 新增：导入通知规则
       let notifyCount = 0
       if (backup.notifications && backup.notifications.length > 0) {
-        notificationService.replaceAllRules(backup.notifications)
+        await notificationService.replaceAllRules(backup.notifications)
         notifyCount = backup.notifications.length
       }
 
@@ -531,12 +531,14 @@ export function createServer(
         if (v === null) (body as Record<string, unknown>)[k] = undefined
       }
       const updated = { ...existing, ...body, id: existing.id }
+      const v = validate(AgentConfigSchema, updated)
+      if (!v.ok) { res.status(400).json({ error: v.error }); return }
       agentRegistry.unregister(existing.id)
-      agentRegistry.register(updated)
-      if (wsAgentServer) syncWsAgentToken(updated, wsAgentServer)
+      agentRegistry.register(v.data)
+      if (wsAgentServer) syncWsAgentToken(v.data, wsAgentServer)
       commandHandler.updateAgents(agentRegistry.listAll())
       await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage)
-      res.json(updated)
+      res.json(v.data)
     } catch (err) {
       const error = err as Error
       res.status(400).json({ error: error.message })
@@ -584,14 +586,11 @@ export function createServer(
     }
     try {
       const start = Date.now()
-      // 使用临时会话进行测试，不持久化到存储
-      const tempSession = await sessionManager.getOrCreate(SINGLE_USER_ID, agentId)
+      // 测试使用隔离的空会话：不能读取或清除真实单用户会话历史。
       const response = await agentRegistry.invoke(agentId, {
         message: { text, type: 'text' },
-        session: { userId: SINGLE_USER_ID, agentId, history: tempSession.history },
+        session: { userId: SINGLE_USER_ID, agentId, history: [] },
       })
-      // 测试后清理临时会话，避免污染会话列表
-      await sessionManager.clear(SINGLE_USER_ID, agentId)
       res.json({
         text: response.reply.text,
         elapsed: Date.now() - start,
@@ -656,11 +655,11 @@ export function createServer(
     }
   })
 
-  app.post('/api/notify/rules', dynamicAuth, (req, res) => {
+  app.post('/api/notify/rules', dynamicAuth, async (req, res) => {
     try {
       const v = validate(NotifyRuleSchema, req.body)
       if (!v.ok) { res.status(400).json({ error: v.error }); return }
-      notificationService.addRule(v.data)
+      await notificationService.addRule(v.data)
       res.status(201).json(v.data)
     } catch (err) {
       const error = err as Error
@@ -668,9 +667,14 @@ export function createServer(
     }
   })
 
-  app.delete('/api/notify/rules/:id', dynamicAuth, (req, res) => {
-    notificationService.removeRule(req.params.id as string)
-    res.json({ ok: true })
+  app.delete('/api/notify/rules/:id', dynamicAuth, async (req, res) => {
+    try {
+      await notificationService.removeRule(req.params.id as string)
+      res.json({ ok: true })
+    } catch (err) {
+      const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
   })
 
   app.get('/api/notify/log', dynamicAuth, async (_req, res) => {

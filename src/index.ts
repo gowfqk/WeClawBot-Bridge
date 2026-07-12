@@ -44,6 +44,7 @@ async function main(): Promise<void> {
   const botManager = new BotManager(botStorage, 'WeChatAgentGateway/1.0')
 
   const notificationService = new NotificationService(botManager, rawStorage)
+  await notificationService.loadRules()
 
   for (const agent of config.agents) {
     agentRegistry.register(agent)

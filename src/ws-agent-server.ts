@@ -206,23 +206,25 @@ export class WsAgentServer {
     return this.agentTokens.get(agentId)
   }
 
-  /** 设置 Agent 认证 token（由 Bridge 管理面板分配） */
+  /** 设置 Agent 认证 token（由 Bridge 管理面板分配）。Token 轮换会立即撤销旧连接。 */
   setAgentToken(agentId: string, token: string): void {
+    const previous = this.agentTokens.get(agentId)
     this.agentTokens.set(agentId, token)
     this.persistTokens()
+    if (previous && previous !== token) this.disconnectAgent(agentId, 'Token 已轮换')
   }
 
-  /** 移除 Agent token */
+  /** 移除 Agent token 并立即断开已认证的旧连接。 */
   removeAgentToken(agentId: string): void {
     this.agentTokens.delete(agentId)
     this.persistTokens()
+    this.disconnectAgent(agentId, 'Token 已撤销')
   }
 
   /** 生成 token 并注册 */
   generateToken(agentId: string): string {
     const token = `wsk_${agentId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
-    this.agentTokens.set(agentId, token)
-    this.persistTokens()
+    this.setAgentToken(agentId, token)
     return token
   }
 
@@ -304,6 +306,14 @@ export class WsAgentServer {
       this.wss = null
     }
     log.info('WS Agent Server 已关闭')
+  }
+
+  /** 断开指定 Agent，确保 Token 轮换/撤销立即生效。 */
+  private disconnectAgent(agentId: string, reason: string): void {
+    const conn = this.connections.get(agentId)
+    if (!conn) return
+    try { conn.ws.close(4003, reason) } catch {}
+    this.removeConnection(agentId, reason, conn.ws)
   }
 
   // ===== 私有方法 =====

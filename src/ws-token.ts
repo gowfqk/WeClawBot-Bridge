@@ -31,7 +31,10 @@ export function resolveWsToken(
 
 /** Synchronize a manually edited Agent Token with the WS authentication registry. */
 export function syncWsAgentToken(agent: AgentConfig, wsAgentServer: TokenRegistry): void {
-  if (agent.type !== 'ws-remote') return
+  if (agent.type !== 'ws-remote') {
+    wsAgentServer.removeAgentToken(agent.id)
+    return
+  }
   if (agent.apiKey) {
     wsAgentServer.setAgentToken(agent.id, agent.apiKey)
   } else {

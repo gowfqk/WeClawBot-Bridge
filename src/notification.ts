@@ -9,6 +9,7 @@ const log = createLogger('notification')
 
 const MAX_RETRIES = 3
 const RETRY_DELAYS = [1000, 2000, 4000]
+const NOTIFICATION_RULES_KEY = 'config:notification_rules'
 
 export class NotificationService {
   private botManager: BotManager
@@ -64,25 +65,34 @@ export class NotificationService {
     if (lastError) throw lastError
   }
 
-  addRule(rule: NotificationRule): void {
+  /** Load durable notification rules before starting the scheduler. */
+  async loadRules(): Promise<void> {
+    const rules = await this.storage.get<NotificationRule[]>(NOTIFICATION_RULES_KEY)
+    if (Array.isArray(rules)) {
+      await this.replaceAllRules(rules, false)
+    }
+  }
+
+  private async persistRules(): Promise<void> {
+    await this.storage.set(NOTIFICATION_RULES_KEY, this.listRules())
+  }
+
+  async addRule(rule: NotificationRule): Promise<void> {
+    this.removeRuleInMemory(rule.id)
     this.rules.set(rule.id, rule)
 
     if (rule.type === 'cron' && rule.schedule) {
       this.startCronJob(rule)
     }
-
     if (rule.type === 'event' && rule.event) {
-      const handler = async () => {
-        await this.send(rule.userId, rule.content)
-      }
-      this.eventHandlers.set(rule.event, handler)
+      this.eventHandlers.set(rule.event, async () => this.send(rule.userId, rule.content))
     }
+    await this.persistRules()
   }
 
-  removeRule(id: string): void {
+  private removeRuleInMemory(id: string): void {
     const rule = this.rules.get(id)
     if (!rule) return
-
     if (rule.type === 'cron') {
       const job = this.cronJobs.get(id)
       if (job) {
@@ -90,12 +100,13 @@ export class NotificationService {
         this.cronJobs.delete(id)
       }
     }
-
-    if (rule.type === 'event' && rule.event) {
-      this.eventHandlers.delete(rule.event)
-    }
-
+    if (rule.type === 'event' && rule.event) this.eventHandlers.delete(rule.event)
     this.rules.delete(id)
+  }
+
+  async removeRule(id: string): Promise<void> {
+    this.removeRuleInMemory(id)
+    await this.persistRules()
   }
 
   private startCronJob(rule: NotificationRule): void {
@@ -141,16 +152,19 @@ export class NotificationService {
     return Array.from(this.rules.values())
   }
 
-  /** 批量替换通知规则（用于备份导入） */
-  replaceAllRules(rules: NotificationRule[]): void {
-    // 先清除现有规则
-    for (const rule of this.rules.values()) {
-      this.removeRule(rule.id)
+  /** Replace all rules; optionally persist the new collection. */
+  async replaceAllRules(rules: NotificationRule[], persist: boolean = true): Promise<void> {
+    for (const rule of Array.from(this.rules.values())) {
+      this.removeRuleInMemory(rule.id)
     }
-    // 添加新规则
     for (const rule of rules) {
-      this.addRule(rule)
+      this.rules.set(rule.id, rule)
+      if (rule.type === 'cron' && rule.schedule) this.startCronJob(rule)
+      if (rule.type === 'event' && rule.event) {
+        this.eventHandlers.set(rule.event, async () => this.send(rule.userId, rule.content))
+      }
     }
+    if (persist) await this.persistRules()
   }
 
   async getNotificationLogs(): Promise<NotificationLog[]> {

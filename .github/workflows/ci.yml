@@ -21,9 +21,7 @@ jobs:
       - run: npm ci
 
       - run: npm run build
-
-      # 测试暂跳过（项目暂无测试用例），加上后取消注释:
-      # - run: npm test
+      - run: npm test
 
       # ===== 微信通知 =====
       - name: 通知成功
