@@ -164,11 +164,6 @@ async function main(): Promise<void> {
     notificationService.stopScheduler()
     agentRegistry.closeAllCliSessions()
     wsAgentServer.close()
-    // 清理 rate-limit 定时器，防止内存泄漏
-    const appWithDestroy = app as unknown as Record<string, unknown>
-    if (typeof appWithDestroy.destroy === 'function') {
-      (appWithDestroy.destroy as () => void)()
-    }
     await botManager.stop()
 
     // 优雅关闭：停止接受新连接，等待现有请求完成

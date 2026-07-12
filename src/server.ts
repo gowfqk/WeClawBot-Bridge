@@ -12,7 +12,6 @@ import { saveAgents } from './config'
 import type { Storage } from './types'
 import { API_KEY_STORAGE_KEY } from './types'
 import type { Logger } from 'pino'
-import { rateLimitMiddleware } from './middleware/rate-limit'
 import { loggingMiddleware } from './middleware/logging'
 import { SessionAuth } from './middleware/session-auth'
 import { csrfOriginMiddleware } from './middleware/csrf'
@@ -79,16 +78,16 @@ export function createServer(
   app.use(cookieParser())
   app.use(express.json({ limit: '1mb' }))
   app.use(loggingMiddleware(logger))
-  const rateLimiter = rateLimitMiddleware()
-  app.use(rateLimiter)
+  // Static assets never consume the API request quota. Browsers request favicon.ico
+  // automatically, so counting it can cause a noisy 429 without any API activity.
+  app.use(express.static(path.resolve(__dirname, '../public')))
+  app.get('/favicon.ico', (_req, res) => res.status(204).end())
 
   // CSRF 保护：验证浏览器请求的 Origin/Referer 头
   const allowedOrigins = corsOrigins === false
     ? undefined
     : (corsOrigins as string[]).map(o => o.replace(/\/$/, ''))
   app.use('/api', csrfOriginMiddleware(allowedOrigins))
-
-  app.use(express.static(path.resolve(__dirname, '../public')))
 
   app.get('/admin', (_req, res) => {
     res.redirect('/')
@@ -187,7 +186,7 @@ export function createServer(
   }
 
   // ===== 认证 API =====
-  app.post('/api/auth/login', rateLimitMiddleware(5, 60_000), async (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     const v = validate(LoginSchema, req.body)
     if (!v.ok) { res.status(400).json({ error: v.error }); return }
     const { password } = v.data
@@ -236,7 +235,7 @@ export function createServer(
     res.json({ authenticated: result.valid, passwordSet: true })
   })
 
-  app.post('/api/auth/setup', rateLimitMiddleware(3, 60_000), async (req, res) => {
+  app.post('/api/auth/setup', async (req, res) => {
     // 首次设置密码（仅在未设置时允许）
     const passwordSet = await sessionAuth.isPasswordSet()
     if (passwordSet) {
@@ -777,11 +776,6 @@ export function createServer(
     }
     res.sendFile(path.resolve(__dirname, '../public/index.html'))
   })
-
-  // 挂载清理函数，供 shutdown 时调用
-  ;(app as unknown as Record<string, unknown>).destroy = (): void => {
-    rateLimiter.destroy()
-  }
 
   return app
 }
