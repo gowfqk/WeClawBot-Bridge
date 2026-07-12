@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentConfig } from './types'
-import { generateWsToken, resolveWsToken } from './ws-token'
+import { generateWsToken, resolveWsToken, syncWsAgentToken } from './ws-token'
 
 const wsRemoteAgent = (overrides: Partial<AgentConfig> = {}): AgentConfig => ({
   id: '2022',
@@ -17,6 +17,7 @@ describe('WS Agent token persistence', () => {
     const wsAgentServer = {
       getAgentToken: vi.fn(() => undefined),
       setAgentToken: vi.fn(),
+      removeAgentToken: vi.fn(),
       generateToken: vi.fn(),
     }
     const agentRegistry = {
@@ -28,10 +29,37 @@ describe('WS Agent token persistence', () => {
     expect(wsAgentServer.setAgentToken).toHaveBeenCalledWith('2022', 'wsk_2022_saved')
   })
 
+  it('updates the WS authentication registry after a manual Token edit', () => {
+    const wsAgentServer = {
+      getAgentToken: vi.fn(),
+      setAgentToken: vi.fn(),
+      removeAgentToken: vi.fn(),
+      generateToken: vi.fn(),
+    }
+
+    syncWsAgentToken(wsRemoteAgent({ apiKey: 'manual-new-token' }), wsAgentServer)
+
+    expect(wsAgentServer.setAgentToken).toHaveBeenCalledWith('2022', 'manual-new-token')
+  })
+
+  it('removes the WS authentication token when the Token field is cleared', () => {
+    const wsAgentServer = {
+      getAgentToken: vi.fn(),
+      setAgentToken: vi.fn(),
+      removeAgentToken: vi.fn(),
+      generateToken: vi.fn(),
+    }
+
+    syncWsAgentToken(wsRemoteAgent({ apiKey: undefined }), wsAgentServer)
+
+    expect(wsAgentServer.removeAgentToken).toHaveBeenCalledWith('2022')
+  })
+
   it('stores a newly generated token in the Agent configuration', async () => {
     const wsAgentServer = {
       getAgentToken: vi.fn(),
       setAgentToken: vi.fn(),
+      removeAgentToken: vi.fn(),
       generateToken: vi.fn(() => 'wsk_2022_new'),
     }
     const agentRegistry = {

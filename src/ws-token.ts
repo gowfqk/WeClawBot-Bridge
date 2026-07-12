@@ -3,6 +3,7 @@ import type { AgentConfig } from './types'
 interface TokenRegistry {
   getAgentToken(agentId: string): string | undefined
   setAgentToken(agentId: string, token: string): void
+  removeAgentToken(agentId: string): void
   generateToken(agentId: string): string
 }
 
@@ -21,11 +22,21 @@ export function resolveWsToken(
   if (existing) return existing
 
   const agent = agentRegistry.get(agentId)
-  const persisted = agent?.type === 'ws-remote' && typeof agent.apiKey === 'string' && agent.apiKey.startsWith('wsk_')
+  const persisted = agent?.type === 'ws-remote' && typeof agent.apiKey === 'string' && agent.apiKey.length > 0
     ? agent.apiKey
     : undefined
   if (persisted) wsAgentServer.setAgentToken(agentId, persisted)
   return persisted
+}
+
+/** Synchronize a manually edited Agent Token with the WS authentication registry. */
+export function syncWsAgentToken(agent: AgentConfig, wsAgentServer: TokenRegistry): void {
+  if (agent.type !== 'ws-remote') return
+  if (agent.apiKey) {
+    wsAgentServer.setAgentToken(agent.id, agent.apiKey)
+  } else {
+    wsAgentServer.removeAgentToken(agent.id)
+  }
 }
 
 /** Generate a WS token and store it with the Agent configuration for restart/deploy recovery. */

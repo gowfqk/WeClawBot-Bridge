@@ -18,7 +18,7 @@ import { SessionAuth } from './middleware/session-auth'
 import { csrfOriginMiddleware } from './middleware/csrf'
 import { getMetrics, botStatus } from './metrics'
 import { SINGLE_USER_ID, normalizeUserId } from './single-user'
-import { generateWsToken, resolveWsToken } from './ws-token'
+import { generateWsToken, resolveWsToken, syncWsAgentToken } from './ws-token'
 import {
   LoginSchema, SetupSchema, ChangePasswordSchema,
   AgentConfigSchema, NotifySchema, NotifyRuleSchema,
@@ -533,6 +533,7 @@ export function createServer(
       const updated = { ...existing, ...body, id: existing.id }
       agentRegistry.unregister(existing.id)
       agentRegistry.register(updated)
+      if (wsAgentServer) syncWsAgentToken(updated, wsAgentServer)
       commandHandler.updateAgents(agentRegistry.listAll())
       await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage)
       res.json(updated)
