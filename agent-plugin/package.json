@@ -1,6 +1,6 @@
 {
   "name": "weclawbot-agent-plugin",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "WeClawBot Agent 插件 SDK — 让 AI Agent 主动连接 WeClawBot-Bridge",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,7 +12,14 @@
     "build": "tsc",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["weclawbot", "agent", "websocket", "plugin", "sdk", "bridge"],
+  "keywords": [
+    "weclawbot",
+    "agent",
+    "websocket",
+    "plugin",
+    "sdk",
+    "bridge"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",

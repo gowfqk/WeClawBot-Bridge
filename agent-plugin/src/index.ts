@@ -140,6 +140,7 @@ export class WeClawBotAgent {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private onStatusChange?: (status: AgentStatus) => void
+  private shouldReconnect = false
 
   constructor(config: AgentPluginConfig, onStatusChange?: (status: AgentStatus) => void) {
     this.config = config
@@ -153,6 +154,7 @@ export class WeClawBotAgent {
 
   /** 连接到 Bridge */
   connect(): void {
+    this.shouldReconnect = true
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return
     }
@@ -160,8 +162,10 @@ export class WeClawBotAgent {
     this.setStatus('connecting')
     console.log(`[WeClawBot] 连接 ${this.config.bridgeUrl} ...`)
 
+    let ws: WebSocket
     try {
-      this.ws = new WebSocket(this.config.bridgeUrl)
+      ws = new WebSocket(this.config.bridgeUrl)
+      this.ws = ws
     } catch (err) {
       console.error('[WeClawBot] 连接创建失败:', err)
       this.scheduleReconnect()
@@ -169,6 +173,7 @@ export class WeClawBotAgent {
     }
 
     this.ws.on('open', () => {
+      if (this.ws !== ws) return
       // 发送认证
       const auth: AuthMessage = {
         type: 'auth',
@@ -179,14 +184,17 @@ export class WeClawBotAgent {
         description: this.config.description,
         model: this.config.model,
       }
-      this.ws!.send(JSON.stringify(auth))
+      ws.send(JSON.stringify(auth))
     })
 
     this.ws.on('message', (data: WebSocket.Data) => {
+      if (this.ws !== ws) return
       this.handleMessage(data)
     })
 
     this.ws.on('close', (code: number, reason: Buffer) => {
+      if (this.ws !== ws) return
+      this.ws = null
       this.onDisconnect(`连接关闭 (${code}: ${reason.toString() || 'no reason'})`)
     })
 
@@ -210,6 +218,7 @@ export class WeClawBotAgent {
 
   /** 断开连接 */
   disconnect(): void {
+    this.shouldReconnect = false
     this.cleanup()
     if (this.ws) {
       try { this.ws.close(1000, 'client disconnect') } catch {}
@@ -450,6 +459,10 @@ export class WeClawBotAgent {
   private onDisconnect(reason: string): void {
     const wasConnected = this.status === 'connected'
     this.cleanup()
+    if (!this.shouldReconnect) {
+      this.setStatus('disconnected')
+      return
+    }
     this.setStatus('reconnecting')
 
     if (wasConnected) {
@@ -460,6 +473,7 @@ export class WeClawBotAgent {
   }
 
   private scheduleReconnect(): void {
+    if (!this.shouldReconnect) return
     // 无限重连：不设上限
     if (this.reconnectTimer) return
 

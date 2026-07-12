@@ -52,6 +52,7 @@ export class WsAgentChannel {
   private reconnectAttempts = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null
+  private shouldReconnect = false
 
   private pending: Map<string, PendingRequest> = new Map()
   private messageQueue: AgentPayload[] = []  // 断线时排队
@@ -85,16 +86,19 @@ export class WsAgentChannel {
 
   /** 启动连接 */
   connect(): void {
+    this.shouldReconnect = true
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return
     }
 
     log.info({ agentId: this.agentId, url: this.url }, 'WS 通道连接中...')
 
+    let ws: WebSocket
     try {
-      this.ws = new WebSocket(this.url, {
+      ws = new WebSocket(this.url, {
         headers: this.headers,
       })
+      this.ws = ws
     } catch (err) {
       log.error({ agentId: this.agentId, err }, 'WS 连接创建失败')
       this.scheduleReconnect()
@@ -102,6 +106,7 @@ export class WsAgentChannel {
     }
 
     this.ws.on('open', () => {
+      if (this.ws !== ws) return
       this.connected = true
       this.reconnectAttempts = 0
       log.info({ agentId: this.agentId }, 'WS 通道已连接')
@@ -111,10 +116,13 @@ export class WsAgentChannel {
     })
 
     this.ws.on('message', (data: WebSocket.Data) => {
+      if (this.ws !== ws) return
       this.handleMessage(data)
     })
 
     this.ws.on('close', (code, reason) => {
+      if (this.ws !== ws) return
+      this.ws = null
       this.onDisconnect(`连接关闭 (${code}: ${reason.toString() || 'no reason'})`)
     })
 
@@ -162,6 +170,7 @@ export class WsAgentChannel {
 
   /** 主动断开 */
   disconnect(): void {
+    this.shouldReconnect = false
     this.cleanup()
     if (this.ws) {
       try { this.ws.close(1000, 'client disconnect') } catch {}
@@ -226,12 +235,17 @@ export class WsAgentChannel {
       log.warn({ agentId: this.agentId, reason }, 'WS 通道断开')
     }
 
+    if (!this.shouldReconnect) {
+      this.emitStatus('disconnected')
+      return
+    }
     this.emitStatus('reconnecting')
     this.scheduleReconnect()
   }
 
   /** 安排重连（指数退避） */
   private scheduleReconnect(): void {
+    if (!this.shouldReconnect) return
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       log.error({ agentId: this.agentId, attempts: this.reconnectAttempts }, 'WS 达到最大重连次数，停止重连')
       this.emitStatus('failed')
