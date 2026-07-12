@@ -66,9 +66,9 @@ export class WsAgentChannel {
   ) {
     this.agentId = agent.id
     this.url = agent.wsUrl || agent.endpoint || ''
-    this.reconnectInterval = agent.wsReconnectInterval || 3000
-    this.heartbeatInterval = agent.wsHeartbeatInterval || 30000
-    this.maxReconnectAttempts = agent.wsMaxReconnectAttempts || Infinity
+    this.reconnectInterval = agent.wsReconnectInterval ?? 3000
+    this.heartbeatInterval = agent.wsHeartbeatInterval ?? 30000
+    this.maxReconnectAttempts = agent.wsMaxReconnectAttempts ?? Infinity
     this.onStatusChange = onStatusChange
 
     this.headers = { ...(agent.headers || {}) }

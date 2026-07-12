@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { validate, LoginSchema, SetupSchema, ChangePasswordSchema, AgentConfigSchema } from './schemas'
+import { validate, LoginSchema, SetupSchema, ChangePasswordSchema, AgentConfigSchema, ConfigImportSchema } from './schemas'
 
 describe('Schemas', () => {
   describe('LoginSchema', () => {
@@ -64,6 +64,12 @@ describe('Schemas', () => {
         type: 'invalid',
       })
       expect(r.ok).toBe(false)
+    })
+  })
+
+  describe('ConfigImportSchema', () => {
+    it('requires agents so an incomplete import cannot empty the registry', () => {
+      expect(validate(ConfigImportSchema, {}).ok).toBe(false)
     })
   })
 })

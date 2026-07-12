@@ -13,6 +13,7 @@
  *   6. Agent 可主动推送 → {type:'push', text, userId?}
  */
 
+import crypto from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import type { Server } from 'node:http'
 import type { AgentPayload, AgentResponse } from './types'
@@ -133,7 +134,7 @@ export class WsAgentServer {
 
   /** 挂载到 HTTP server 上 */
   attach(httpServer: Server, path = '/ws/agent'): void {
-    this.wss = new WebSocketServer({ server: httpServer, path })
+    this.wss = new WebSocketServer({ server: httpServer, path, maxPayload: 256 * 1024 })
 
     this.wss.on('connection', (ws, req) => {
       const clientIp = req.socket.remoteAddress
@@ -151,36 +152,41 @@ export class WsAgentServer {
       }, 10000)
 
       ws.on('message', (data) => {
-        let msg: WsServerInbound
         try {
-          msg = JSON.parse(data.toString())
-        } catch {
-          this.send(ws, { type: 'error', reason: '无效 JSON' })
-          return
-        }
-
-        // 未认证：只接受 auth 消息
-        if (!authenticated) {
-          if (msg.type !== 'auth') {
-            this.send(ws, { type: 'auth_fail', reason: '请先发送 auth 消息' })
-            ws.close(4003, 'not authenticated')
+          let msg: WsServerInbound
+          try {
+            msg = JSON.parse(data.toString())
+          } catch {
+            this.send(ws, { type: 'error', reason: '无效 JSON' })
             return
           }
-          const auth = msg as WsAuthMessage
-          const result = this.authenticate(auth, ws)
-          if (result.ok) {
-            authenticated = true
-            agentId = auth.agentId
-            clearTimeout(authTimer)
-          } else {
-            this.send(ws, { type: 'auth_fail', reason: result.reason! })
-            ws.close(4003, 'auth failed')
-          }
-          return
-        }
 
-        // 已认证：处理消息
-        this.handleMessage(agentId!, msg, ws)
+          // 未认证：只接受 auth 消息
+          if (!authenticated) {
+            if (msg.type !== 'auth') {
+              this.send(ws, { type: 'auth_fail', reason: '请先发送 auth 消息' })
+              ws.close(4003, 'not authenticated')
+              return
+            }
+            const auth = msg as WsAuthMessage
+            const result = this.authenticate(auth, ws)
+            if (result.ok) {
+              authenticated = true
+              agentId = auth.agentId
+              clearTimeout(authTimer)
+            } else {
+              this.send(ws, { type: 'auth_fail', reason: result.reason! })
+              ws.close(4003, 'auth failed')
+            }
+            return
+          }
+
+          // 已认证：处理消息
+          this.handleMessage(agentId!, msg, ws)
+        } catch (err) {
+          log.warn({ agentId, err: err instanceof Error ? err.message : String(err) }, 'WS Agent 消息处理失败')
+          this.send(ws, { type: 'error', reason: '无效消息' })
+        }
       })
 
       ws.on('close', (code, reason) => {
@@ -223,7 +229,7 @@ export class WsAgentServer {
 
   /** 生成 token 并注册 */
   generateToken(agentId: string): string {
-    const token = `wsk_${agentId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+    const token = `wsk_${crypto.randomBytes(32).toString('base64url')}`
     this.setAgentToken(agentId, token)
     return token
   }
@@ -321,12 +327,16 @@ export class WsAgentServer {
   private authenticate(auth: WsAuthMessage, ws: WebSocket): { ok: boolean; reason?: string } {
     const { token, agentId, name, command, description, model } = auth
 
-    // 验证 token
-    const expectedToken = this.agentTokens.get(agentId)
-    if (!expectedToken) {
+    if (!agentId || typeof agentId !== 'string' || agentId.length > 128 || !token || typeof token !== 'string') {
+      return { ok: false, reason: '认证消息格式无效' }
+    }
+    const expected = this.agentTokens.get(agentId)
+    if (!expected || typeof token !== 'string') {
       return { ok: false, reason: `Agent "${agentId}" 未注册，请先在管理面板创建 WS Agent 并获取 token` }
     }
-    if (token !== expectedToken) {
+    const provided = Buffer.from(token)
+    const expectedBuffer = Buffer.from(expected)
+    if (provided.length !== expectedBuffer.length || !crypto.timingSafeEqual(provided, expectedBuffer)) {
       return { ok: false, reason: 'Token 验证失败' }
     }
 
@@ -373,7 +383,10 @@ export class WsAgentServer {
 
   private handleMessage(agentId: string, msg: WsServerInbound, ws: WebSocket): void {
     const conn = this.connections.get(agentId)
-    if (!conn) return
+    if (!conn || conn.ws !== ws) {
+      log.warn({ agentId }, '忽略过期 WS 连接消息')
+      return
+    }
 
     conn.lastActivity = Date.now()
 

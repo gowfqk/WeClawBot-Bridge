@@ -80,7 +80,7 @@ export const SessionConfigSchema = z.object({
 export const ConfigImportSchema = z.object({
   version: z.number().optional(),
   exportedAt: z.string().optional(),
-  agents: z.array(AgentConfigSchema).optional(),
+  agents: z.array(AgentConfigSchema),
   notifications: z.array(NotifyRuleSchema).optional(),
   defaultAgentId: z.string().optional(),
   session: z.object({

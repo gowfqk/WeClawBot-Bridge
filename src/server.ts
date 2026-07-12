@@ -41,9 +41,9 @@ export function createServer(
 ) {
   const app = express()
 
-  // 信任反向代理（Nginx/Cloudflare 等），使 req.ip 反映真实客户端 IP
-  // 设为 1 表示信任第一层代理，设为 true 信任所有代理（不推荐生产环境）
-  app.set('trust proxy', 1)
+  // Only trust forwarding headers when deployment explicitly opts in. Public direct
+  // access must not be able to spoof X-Forwarded-For and bypass rate limiting.
+  if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1)
 
   // 自定义 CSP 配置，允许管理界面必要的资源
   app.use(helmet({
@@ -562,7 +562,10 @@ export function createServer(
 
   app.delete('/api/agents/:id', dynamicAuth, async (req, res) => {
     try {
-      agentRegistry.unregister(req.params.id as string)
+      const agentId = req.params.id as string
+      const existing = agentRegistry.get(agentId)
+      agentRegistry.unregister(agentId)
+      if (wsAgentServer && existing?.type === 'ws-remote') wsAgentServer.removeAgentToken(agentId)
       commandHandler.updateAgents(agentRegistry.listAll())
       await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage)
       res.json({ ok: true })

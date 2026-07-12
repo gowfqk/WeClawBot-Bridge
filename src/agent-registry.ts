@@ -29,8 +29,18 @@ export class AgentRegistry {
   }
 
   register(config: AgentConfig): void {
+    const previous = this.agents.get(config.id)
+    if (previous) {
+      const oldCommand = previous.command.toLowerCase()
+      if (this.commandIndex.get(oldCommand) === config.id) this.commandIndex.delete(oldCommand)
+    }
+    const command = config.command.toLowerCase()
+    const existingId = this.commandIndex.get(command)
+    if (existingId && existingId !== config.id) {
+      throw new Error(`切换命令 "${config.command}" 已被 Agent "${existingId}" 使用`)
+    }
     this.agents.set(config.id, { ...config })
-    this.commandIndex.set(config.command.toLowerCase(), config.id)
+    this.commandIndex.set(command, config.id)
     // WS 类型：自动建立持久连接
     if (config.type === 'ws') {
       this.connectWs(config)
