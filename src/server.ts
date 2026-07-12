@@ -18,6 +18,7 @@ import { SessionAuth } from './middleware/session-auth'
 import { csrfOriginMiddleware } from './middleware/csrf'
 import { getMetrics, botStatus } from './metrics'
 import { SINGLE_USER_ID, normalizeUserId } from './single-user'
+import { generateWsToken, resolveWsToken } from './ws-token'
 import {
   LoginSchema, SetupSchema, ChangePasswordSchema,
   AgentConfigSchema, NotifySchema, NotifyRuleSchema,
@@ -616,8 +617,15 @@ export function createServer(
       return
     }
     const agentId = req.params.id as string
-    const token = wsAgentServer.generateToken(agentId)
-    res.json({ agentId, token })
+    generateWsToken(
+      agentId,
+      wsAgentServer,
+      agentRegistry,
+      () => saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage),
+    ).then(token => res.json({ agentId, token })).catch(err => {
+      logger.error({ agentId, err: (err as Error).message }, '保存 WS Agent Token 失败')
+      res.status(500).json({ error: 'Token 保存失败' })
+    })
   })
 
   // 查看已有 Token（不重新生成）
@@ -627,7 +635,7 @@ export function createServer(
       return
     }
     const agentId = req.params.id as string
-    const token = wsAgentServer.getAgentToken(agentId)
+    const token = resolveWsToken(agentId, wsAgentServer, agentRegistry)
     if (token) {
       res.json({ agentId, token })
     } else {
