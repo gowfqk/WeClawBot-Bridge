@@ -1,0 +1,24 @@
+services:
+  weclawbot:
+    image: ghcr.io/gowfqk/weclawbot-bridge:latest
+    container_name: weclawbot-bridge
+    restart: unless-stopped
+    ports:
+      - '${PORT:-3000}:3000'
+    volumes:
+      - gate-storage:/data
+    environment:
+      # STORAGE_DIR must be the same durable mount used for WeChat credentials,
+      # sessions, Agent configuration, and WS tokens.
+      - STORAGE_DIR=/data
+      - API_KEY=${API_KEY:-}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - SESSION_MAX_ROUNDS=${SESSION_MAX_ROUNDS:-0}
+      - SESSION_EXPIRE_MS=${SESSION_EXPIRE_MS:-0}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+      - TRUST_PROXY=${TRUST_PROXY:-0}
+
+volumes:
+  gate-storage:

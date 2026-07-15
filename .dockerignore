@@ -1,0 +1,7 @@
+node_modules
+dist
+.git
+.wechatbot-gateway
+.env
+# 前端依赖（多阶段构建中 npm ci 重新安装）
+frontend/node_modules

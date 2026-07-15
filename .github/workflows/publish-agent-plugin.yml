@@ -1,0 +1,83 @@
+name: Publish Agent Plugin to npm
+
+on:
+  push:
+    tags:
+      - 'agent-plugin-v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (不实际发包)'
+        required: false
+        default: 'false'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: agent-plugin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: agent-plugin/package-lock.json
+          registry-url: https://registry.npmjs.org
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 构建
+        run: npm run build
+
+      - name: 验证包内容
+        run: npm pack --dry-run
+
+      - name: 从 tag 提取版本号
+        if: startsWith(github.ref, 'refs/tags/agent-plugin-v')
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/agent-plugin-v}
+          echo "Tag version: $TAG_VERSION"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          echo "Package version: $PKG_VERSION"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "❌ Tag 版本 ($TAG_VERSION) 与 package.json 版本 ($PKG_VERSION) 不一致"
+            echo "请先更新 agent-plugin/package.json 的 version 字段"
+            exit 1
+          fi
+
+      - name: 发布 (dry run)
+        if: github.event.inputs.dry_run == 'true'
+        run: npm publish --dry-run --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: 发布到 npm
+        if: github.event.inputs.dry_run != 'true'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: 通知成功
+        if: success()
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          curl -s -X POST ${{ secrets.WECLAW_WEBHOOK_URL }} \
+            -H "Content-Type: application/json" \
+            -H "X-Webhook-Secret: ${{ secrets.WECLAW_WEBHOOK_SECRET }}" \
+            -d "{\"content\":{\"text\":\"✅ weclawbot-agent-plugin@$VERSION 已发布到 npm\\n触发：${{ github.ref_name }}\"}}"
+
+      - name: 通知失败
+        if: failure()
+        run: |
+          curl -s -X POST ${{ secrets.WECLAW_WEBHOOK_URL }} \
+            -H "Content-Type: application/json" \
+            -H "X-Webhook-Secret: ${{ secrets.WECLAW_WEBHOOK_SECRET }}" \
+            -d "{\"content\":{\"text\":\"❌ weclawbot-agent-plugin 发布失败\\n触发：${{ github.ref_name }}\\n请检查 Actions 日志\"}}"

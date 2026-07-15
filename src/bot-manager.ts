@@ -1,0 +1,243 @@
+import { WeChatBot, type Storage } from '@wechatbot/wechatbot'
+import type { BotStatus, SendContent as GatewaySendContent } from './types'
+import { createLogger } from './logger'
+
+const log = createLogger('bot-manager')
+
+export type MessageHandler = (msg: {
+  userId: string
+  text: string
+  type: string
+  hasMedia: boolean
+  raw: unknown
+}) => Promise<void>
+
+export class BotManager {
+  private bot: WeChatBot
+  private status: BotStatus = { loggedIn: false, polling: false }
+  private currentQrUrl: string | undefined
+  private isStarted: boolean = false
+  private loginPromise: Promise<unknown> | null = null
+  private qrCallback: ((url: string) => void) | undefined
+  private qrRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null
+  private readonly KEEPALIVE_INTERVAL = 4 * 60 * 60 * 1000 // 4 小时
+
+  constructor(storage: Storage, botAgent?: string) {
+    this.bot = new WeChatBot({
+      storage,
+      botAgent: botAgent || 'WeChatAgentGateway/1.0',
+      logLevel: 'info',
+    })
+
+    this.bot.on('login', (creds) => {
+      log.info({ accountId: creds.accountId }, 'Bot logged in event received')
+      this.status = {
+        loggedIn: true,
+        accountId: creds.accountId,
+        currentUser: (creds as unknown as Record<string, unknown>).userId as string,
+        polling: false,
+      }
+      this.startKeepalive()
+      // 登录后启动消息轮询
+      this.start().catch((err) => {
+        log.error({ err }, 'Failed to start polling after login')
+      })
+    })
+
+    this.bot.on('session:expired', () => {
+      log.warn('Session expired, attempting auto-reconnect...')
+      this.status = { loggedIn: false, polling: false }
+      this.isStarted = false
+      this.stopKeepalive()
+      // 自动重连
+      this.loginAndStart(this.qrCallback).then(() => {
+        log.info('Auto-reconnect succeeded')
+        this.startKeepalive()
+      }).catch((err) => {
+        log.error({ err }, 'Auto-reconnect failed')
+      })
+    })
+
+    this.bot.on('session:restored', (creds) => {
+      this.status = {
+        loggedIn: true,
+        accountId: creds.accountId,
+        currentUser: (creds as unknown as Record<string, unknown>).userId as string,
+        polling: false,
+      }
+      this.startKeepalive()
+      // 恢复 session 后启动消息轮询
+      this.start().then(() => {
+        log.info('Message polling started after session restore')
+      }).catch((err) => {
+        log.error({ err }, 'Failed to start polling after session restore')
+      })
+    })
+  }
+
+  async login(onQrUrl?: (url: string) => void, force?: boolean): Promise<void> {
+    if (onQrUrl) this.qrCallback = onQrUrl
+
+    // 默认优先恢复 Storage 中已有的微信凭证。仅管理面板明确传入
+    // force=true 时才跳过凭证并重新扫码；进程重启时 status 尚未恢复，
+    // 不能用它来决定 force，否则会让每次部署都丢失绑定。
+    this.loginPromise = this.bot.login({
+      force: force === true,
+      callbacks: {
+        onQrUrl: (url: string) => {
+          this.currentQrUrl = url
+          this.qrCallback?.(url)
+        },
+        onScanned: () => {},
+        onExpired: () => {
+          this.currentQrUrl = undefined
+          // 二维码过期后自动刷新，获取新二维码
+          if (!this.status.loggedIn) {
+            if (this.qrRefreshTimer) clearTimeout(this.qrRefreshTimer)
+            this.qrRefreshTimer = setTimeout(() => {
+              this.qrRefreshTimer = null
+              if (!this.status.loggedIn) {
+                this.login().catch((err) => {
+                  log.error({ err }, 'QR auto-refresh failed')
+                })
+              }
+            }, 1500)
+          }
+        },
+      },
+    })
+    await this.loginPromise
+  }
+
+  async loginAndStart(
+    onQrUrl?: (url: string) => void,
+    maxRetries: number = 3,
+  ): Promise<void> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.login(onQrUrl)
+        log.info('Bot logged in, ensuring message polling is started...')
+        await this.start()
+        return
+      } catch (err) {
+        const error = err as Error
+        log.error({ attempt, maxRetries, err: error.message }, 'Login attempt failed')
+        if (attempt >= maxRetries) {
+          log.error('All login attempts exhausted')
+          throw err
+        }
+        log.info('Retrying in 5 seconds...')
+        await new Promise((r) => setTimeout(r, 5000))
+      }
+    }
+  }
+
+  async start(): Promise<void> {
+    if (this.isStarted) return
+    this.isStarted = true
+    this.status.polling = true
+    this.bot.start().catch((err) => {
+      log.error({ err }, 'Poller crashed')
+      this.status.polling = false
+      this.isStarted = false
+    })
+  }
+
+  // ===== 心跳保活 =====
+
+  /** 启动定期心跳，防止微信 token 48 小时不活动失效
+   *  使用 sendTyping 而非发送消息，避免打扰用户 */
+  startKeepalive(): void {
+    if (this.keepaliveTimer) return
+    this.keepaliveTimer = setInterval(() => {
+      if (!this.status.loggedIn || !this.status.currentUser) return
+      const user = this.status.currentUser
+      this.bot.sendTyping(user).then(() => {
+        log.info({ user }, 'Keepalive typing sent')
+      }).catch((err) => {
+        log.error({ err }, 'Keepalive typing failed')
+      })
+    }, this.KEEPALIVE_INTERVAL)
+    log.info({ intervalHours: this.KEEPALIVE_INTERVAL / 3600000 }, 'Keepalive started')
+  }
+
+  /** 停止心跳 */
+  stopKeepalive(): void {
+    if (this.keepaliveTimer) {
+      clearInterval(this.keepaliveTimer)
+      this.keepaliveTimer = null
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.stopKeepalive()
+    if (this.qrRefreshTimer) {
+      clearTimeout(this.qrRefreshTimer)
+      this.qrRefreshTimer = null
+    }
+    this.isStarted = false
+    this.status.polling = false
+    this.bot.stop()
+  }
+
+  getStatus(): BotStatus {
+    return { ...this.status, qrUrl: this.currentQrUrl }
+  }
+
+  get isRunning(): boolean {
+    return this.isStarted
+  }
+
+  onMessage(handler: MessageHandler): void {
+    this.bot.on('message', async (msg) => {
+      const hasMedia = msg.images.length > 0
+        || msg.files.length > 0
+        || msg.videos.length > 0
+        || msg.voices.length > 0
+
+      await handler({
+        userId: msg.userId,
+        text: msg.text || '',
+        type: msg.type,
+        hasMedia,
+        raw: msg,
+      })
+    })
+  }
+
+  async sendReply(raw: unknown, content: GatewaySendContent): Promise<void> {
+    const incomingMsg = raw as Parameters<WeChatBot['reply']>[0]
+    if (content.text) {
+      await this.bot.reply(incomingMsg, { text: content.text })
+    } else if (content.image) {
+      await this.bot.reply(incomingMsg, { image: content.image, caption: content.caption })
+    } else if (content.file) {
+      await this.bot.reply(incomingMsg, { file: content.file.data, fileName: content.file.fileName, caption: content.caption })
+    } else if (content.video) {
+      await this.bot.reply(incomingMsg, { video: content.video, caption: content.caption })
+    }
+  }
+
+  async send(userId: string, content: GatewaySendContent): Promise<void> {
+    if (content.text) {
+      await this.bot.send(userId, { text: content.text })
+    } else if (content.image) {
+      await this.bot.send(userId, { image: content.image, caption: content.caption })
+    } else if (content.file) {
+      await this.bot.send(userId, { file: content.file.data, fileName: content.file.fileName, caption: content.caption })
+    } else if (content.video) {
+      await this.bot.send(userId, { video: content.video, caption: content.caption })
+    }
+  }
+
+  async download(msg: { raw: unknown }): Promise<Buffer | undefined> {
+    const incomingMsg = msg.raw as Parameters<WeChatBot['download']>[0]
+    const media = await this.bot.download(incomingMsg)
+    return media?.data
+  }
+
+  async sendTyping(userId: string): Promise<void> {
+    await this.bot.sendTyping(userId)
+  }
+}
