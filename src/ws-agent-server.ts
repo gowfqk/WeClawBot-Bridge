@@ -58,7 +58,7 @@ export interface WsErrorMessage {
   reason: string
 }
 
-export type WsServerInbound = WsAuthMessage | WsChatReply | WsPushMessage | { type: 'pong' } | { type: 'ping' } | { type: 'typing' }
+export type WsServerInbound = WsAuthMessage | WsChatReply | WsPushMessage | WsErrorMessage | { type: 'pong' } | { type: 'ping' } | { type: 'typing' }
 export type WsServerOutbound = WsChatMessage | WsErrorMessage | { type: 'auth_ok'; agentId: string } | { type: 'auth_fail'; reason: string } | { type: 'ping' } | { type: 'pong' }
 
 // ===== 连接信息 =====
@@ -426,6 +426,13 @@ export class WsAgentServer {
 
       case 'typing': {
         // Agent 正在输入状态（最佳尽力，不报 unknown type）
+        break
+      }
+
+      case 'error': {
+        // Agent 处理异常通知
+        const errMsg = msg as WsErrorMessage
+        log.warn({ agentId, id: errMsg.id, reason: errMsg.reason }, 'WS Agent 报告处理异常')
         break
       }
 
