@@ -16,6 +16,7 @@ export class BotManager {
   private bot: WeChatBot
   private status: BotStatus = { loggedIn: false, polling: false }
   private currentQrUrl: string | undefined
+  private lastActiveUser: string | undefined  // 最近发消息的真实用户
   private loginPromise: Promise<unknown> | null = null
   private qrCallback: ((url: string) => void) | undefined
   private qrRefreshTimer: ReturnType<typeof setTimeout> | null = null
@@ -132,8 +133,10 @@ export class BotManager {
   startKeepalive(): void {
     if (this.keepaliveTimer) return
     this.keepaliveTimer = setInterval(() => {
-      if (!this.status.loggedIn || !this.status.currentUser) return
-      const user = this.status.currentUser
+      if (!this.status.loggedIn) return
+      // 优先发给最近的真实用户，没有则发给 bot 自己（最低保障）
+      const user = this.lastActiveUser || this.status.currentUser
+      if (!user) return
       this.bot.sendTyping(user).then(() => {
         log.info({ user }, 'Keepalive typing sent')
       }).catch((err) => {
@@ -202,6 +205,9 @@ export class BotManager {
         || msg.files.length > 0
         || msg.videos.length > 0
         || msg.voices.length > 0
+
+      // 记录最近的真实用户，供 keepalive 使用
+      if (msg.userId) this.lastActiveUser = msg.userId
 
       await handler({
         userId: msg.userId,

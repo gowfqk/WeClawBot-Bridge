@@ -2,6 +2,7 @@ import cron from 'node-cron'
 import type { ScheduledTask } from 'node-cron'
 import type { Storage, NotificationRule, NotificationLog, SendContent } from './types'
 import type { BotManager } from './bot-manager'
+import { NoContextError } from '@wechatbot/wechatbot'
 import crypto from 'node:crypto'
 import { createLogger } from './logger'
 
@@ -33,7 +34,7 @@ export class NotificationService {
   async send(userId: string | undefined, content: SendContent): Promise<void> {
     const recipient = this.resolveRecipient(userId)
     const logId = crypto.randomUUID()
-    const log: NotificationLog = {
+    const logEntry: NotificationLog = {
       id: logId,
       userId: recipient,
       content,
@@ -46,15 +47,21 @@ export class NotificationService {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         await this.botManager.send(recipient, content)
-        log.status = 'success'
-        delete log.error
-        await this.storage.set(`notify:log:${logId}`, log)
+        logEntry.status = 'success'
+        delete logEntry.error
+        await this.storage.set(`notify:log:${logId}`, logEntry)
         return
       } catch (err) {
         lastError = err as Error
-        log.status = 'failed'
-        log.error = (err as Error).message
-        await this.storage.set(`notify:log:${logId}`, log)
+        logEntry.status = 'failed'
+        logEntry.error = (err as Error).message
+        await this.storage.set(`notify:log:${logId}`, logEntry)
+
+        // 无 context_token 时重试无意义 — 直接失败
+        if (err instanceof NoContextError) {
+          log.warn({ recipient, err: (err as Error).message }, 'No context_token — send failed (not retrying)')
+          throw err
+        }
 
         if (attempt < MAX_RETRIES) {
           await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS[attempt - 1]))

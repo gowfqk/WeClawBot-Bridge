@@ -109,7 +109,11 @@ async function main(): Promise<void> {
     },
     onAgentPush: (agentId, text, userId) => {
       logger.info({ agentId, userId, text: text.slice(0, 50) }, 'WS Agent 主动推送消息')
-      // TODO: 可通过 botManager 主动发消息给微信用户
+      if (userId && text) {
+        notificationService.send(userId, { text }).catch((err) => {
+          logger.warn({ agentId, userId, err: (err as Error).message }, 'Agent push delivery failed')
+        })
+      }
     },
   })
 
