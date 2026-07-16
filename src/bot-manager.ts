@@ -21,7 +21,9 @@ export class BotManager {
   private qrCallback: ((url: string) => void) | undefined
   private qrRefreshTimer: ReturnType<typeof setTimeout> | null = null
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null
+  private pollerHealthTimer: ReturnType<typeof setInterval> | null = null
   private readonly KEEPALIVE_INTERVAL = 4 * 60 * 60 * 1000 // 4 小时
+  private readonly POLLER_HEALTH_INTERVAL = 60 * 1000 // 1 分钟检查一次
 
   constructor(storage: Storage, botAgent?: string) {
     this.bot = new WeChatBot({
@@ -170,8 +172,35 @@ export class BotManager {
     }
   }
 
+  // ===== Poller 健康检查 =====
+
+  /** 定期检查消息轮询状态，崩溃后自动恢复。
+   *  微信 SDK 的 poller 内部有重试循环（指数退避 1s→10s），
+   *  不会因网络抖动崩溃；只有不可恢复错误才会退出 poller。
+   *  此检查作为最后保险，确保 polling 不会永久停止。 */
+  startPollerHealthCheck(): void {
+    if (this.pollerHealthTimer) return
+    this.pollerHealthTimer = setInterval(() => {
+      if (this.status.loggedIn && !this.status.polling) {
+        log.warn('Poller health check: polling stopped while logged in — restarting')
+        this.start().catch((err) => {
+          log.error({ err }, 'Poller health restart failed')
+        })
+      }
+    }, this.POLLER_HEALTH_INTERVAL)
+    log.info({ intervalSecs: this.POLLER_HEALTH_INTERVAL / 1000 }, 'Poller health check started')
+  }
+
+  stopPollerHealthCheck(): void {
+    if (this.pollerHealthTimer) {
+      clearInterval(this.pollerHealthTimer)
+      this.pollerHealthTimer = null
+    }
+  }
+
   async stop(): Promise<void> {
     this.stopKeepalive()
+    this.stopPollerHealthCheck()
     if (this.qrRefreshTimer) {
       clearTimeout(this.qrRefreshTimer)
       this.qrRefreshTimer = null

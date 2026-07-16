@@ -152,6 +152,7 @@ async function main(): Promise<void> {
   }).then(() => {
     botStatus.set(1)
     botManager.startKeepalive()
+    botManager.startPollerHealthCheck()
   }).catch((err) => {
     logger.error({ err }, 'Failed to login after retries')
     logger.info('Use POST /api/bot/login to try again manually')
