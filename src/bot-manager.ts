@@ -16,7 +16,6 @@ export class BotManager {
   private bot: WeChatBot
   private status: BotStatus = { loggedIn: false, polling: false }
   private currentQrUrl: string | undefined
-  private isStarted: boolean = false
   private loginPromise: Promise<unknown> | null = null
   private qrCallback: ((url: string) => void) | undefined
   private qrRefreshTimer: ReturnType<typeof setTimeout> | null = null
@@ -30,63 +29,7 @@ export class BotManager {
       storage,
       botAgent: botAgent || 'WeChatAgentGateway/1.0',
       logLevel: 'info',
-    })
-
-    this.bot.on('login', (creds) => {
-      log.info({ accountId: creds.accountId }, 'Bot logged in event received')
-      this.status = {
-        loggedIn: true,
-        accountId: creds.accountId,
-        currentUser: (creds as unknown as Record<string, unknown>).userId as string,
-        polling: false,
-      }
-      this.startKeepalive()
-      // 登录后启动消息轮询
-      this.start().catch((err) => {
-        log.error({ err }, 'Failed to start polling after login')
-      })
-    })
-
-    this.bot.on('session:expired', () => {
-      log.warn('Session expired, attempting auto-reconnect...')
-      this.status = { loggedIn: false, polling: false }
-      this.isStarted = false
-      this.stopKeepalive()
-      // 自动重连
-      this.loginAndStart(this.qrCallback).then(() => {
-        log.info('Auto-reconnect succeeded')
-        this.startKeepalive()
-      }).catch((err) => {
-        log.error({ err }, 'Auto-reconnect failed')
-      })
-    })
-
-    this.bot.on('session:restored', (creds) => {
-      this.status = {
-        loggedIn: true,
-        accountId: creds.accountId,
-        currentUser: (creds as unknown as Record<string, unknown>).userId as string,
-        polling: false,
-      }
-      this.startKeepalive()
-      // 恢复 session 后启动消息轮询
-      this.start().then(() => {
-        log.info('Message polling started after session restore')
-      }).catch((err) => {
-        log.error({ err }, 'Failed to start polling after session restore')
-      })
-    })
-  }
-
-  async login(onQrUrl?: (url: string) => void, force?: boolean): Promise<void> {
-    if (onQrUrl) this.qrCallback = onQrUrl
-
-    // 默认优先恢复 Storage 中已有的微信凭证。仅管理面板明确传入
-    // force=true 时才跳过凭证并重新扫码；进程重启时 status 尚未恢复，
-    // 不能用它来决定 force，否则会让每次部署都丢失绑定。
-    this.loginPromise = this.bot.login({
-      force: force === true,
-      callbacks: {
+      loginCallbacks: {
         onQrUrl: (url: string) => {
           this.currentQrUrl = url
           this.qrCallback?.(url)
@@ -94,7 +37,7 @@ export class BotManager {
         onScanned: () => {},
         onExpired: () => {
           this.currentQrUrl = undefined
-          // 二维码过期后自动刷新，获取新二维码
+          // QR 过期后自动刷新
           if (!this.status.loggedIn) {
             if (this.qrRefreshTimer) clearTimeout(this.qrRefreshTimer)
             this.qrRefreshTimer = setTimeout(() => {
@@ -109,6 +52,45 @@ export class BotManager {
         },
       },
     })
+
+    // SDK 内部已在 setupPollerEvents 中处理 session:expired：
+    //   clearAll → login({force:true}) → session:restored → resetCursor
+    // 因此 Bridge 只需要更新状态，不需要重复登录。
+    this.bot.on('session:expired', () => {
+      log.warn('Session expired — SDK will auto-reconnect with QR if needed')
+      this.status = { loggedIn: false, polling: false }
+    })
+
+    this.bot.on('login', (creds) => {
+      log.info({ accountId: creds.accountId }, 'Bot logged in event received')
+      this.status = {
+        loggedIn: true,
+        accountId: creds.accountId,
+        currentUser: (creds as unknown as Record<string, unknown>).userId as string,
+        polling: true,  // SDK's poller auto-starts; don't call start() again
+      }
+      this.startKeepalive()
+    })
+
+    this.bot.on('session:restored', (creds) => {
+      this.status = {
+        loggedIn: true,
+        accountId: creds.accountId,
+        currentUser: (creds as unknown as Record<string, unknown>).userId as string,
+        polling: true,  // SDK resumes poller automatically after re-login
+      }
+      this.startKeepalive()
+    })
+  }
+
+  async login(onQrUrl?: (url: string) => void, force?: boolean): Promise<void> {
+    if (onQrUrl) this.qrCallback = onQrUrl
+
+    // 默认优先恢复 Storage 中已有的微信凭证。仅管理面板明确传入
+    // force=true 时才跳过凭证并重新扫码；进程重启时 status 尚未恢复，
+    // 不能用它来决定 force，否则会让每次部署都丢失绑定。
+    // loginCallbacks 已在构造函数中设置，SDK 会自动使用它们。
+    this.loginPromise = this.bot.login({ force: force === true })
     await this.loginPromise
   }
 
@@ -136,13 +118,10 @@ export class BotManager {
   }
 
   async start(): Promise<void> {
-    if (this.isStarted) return
-    this.isStarted = true
-    this.status.polling = true
+    if (this.bot.isRunning) return
     this.bot.start().catch((err) => {
       log.error({ err }, 'Poller crashed')
       this.status.polling = false
-      this.isStarted = false
     })
   }
 
@@ -205,7 +184,6 @@ export class BotManager {
       clearTimeout(this.qrRefreshTimer)
       this.qrRefreshTimer = null
     }
-    this.isStarted = false
     this.status.polling = false
     this.bot.stop()
   }
@@ -215,7 +193,7 @@ export class BotManager {
   }
 
   get isRunning(): boolean {
-    return this.isStarted
+    return this.bot.isRunning
   }
 
   onMessage(handler: MessageHandler): void {
