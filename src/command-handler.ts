@@ -76,16 +76,16 @@ export class CommandHandler {
   getHelpMessage(): string {
     const lines: string[] = []
 
-    lines.push('=== WeClawBot Bridge ===')
+    lines.push('══ WeClawBot Bridge ══')
     lines.push('')
-    lines.push('系统命令：')
-    lines.push('  #help 或 #h  — 显示此帮助')
-    lines.push('  #status      — 查看 Bot 在线状态')
-    lines.push('  #agents 或 #a — 列出所有 Agent')
-    lines.push('  #clear       — 清空当前 Agent 的对话历史')
-    lines.push('  #agent名     — 切换到指定 Agent')
+    lines.push('📋 系统命令')
+    lines.push('  #help / #h — 显示此帮助')
+    lines.push('  #status — 查看 Bot 在线状态')
+    lines.push('  #agents / #a — 列出所有 Agent')
+    lines.push('  #clear — 清空当前对话历史')
+    lines.push('  #{名称} — 切换到指定 Agent')
     lines.push('')
-    lines.push('切换 Agent 后直接发送消息即可与对应 AI 对话。')
+    lines.push('切换 Agent 后直接发消息即可对话')
 
     return lines.join('\n')
   }
@@ -97,26 +97,24 @@ export class CommandHandler {
       return '当前没有可用的 Agent。'
     }
 
-    lines.push('=== 可用 Agent ===')
+    lines.push('📡 可用 Agent')
     lines.push('')
     for (const agent of this.agents) {
       lines.push(`  #${agent.command} — ${agent.name}`)
-      lines.push(`    ${agent.description}`)
+      if (agent.description) {
+        lines.push(`    ${agent.description}`)
+      }
     }
     lines.push('')
-    lines.push('发送 #agent名 即可切换 Agent。')
+    lines.push('发送 #名称 即可切换')
 
     return lines.join('\n')
   }
 
   getStatusMessage(loggedIn: boolean, accountId?: string): string {
     if (!loggedIn) {
-      return 'Bot 状态：离线'
+      return '🔴 Bot 离线'
     }
-    const lines = [
-      'Bot 状态：在线',
-      `账号：${accountId || '未知'}`,
-    ]
-    return lines.join('\n')
+    return `🟢 Bot 在线\n📱 ${accountId || '未知'}`
   }
 }
