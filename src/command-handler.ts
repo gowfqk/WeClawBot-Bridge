@@ -111,10 +111,23 @@ export class CommandHandler {
     return lines.join('\n')
   }
 
-  getStatusMessage(loggedIn: boolean, accountId?: string): string {
-    if (!loggedIn) {
-      return '🔴 **Bot 离线**'
+  getStatusMessage(agentRegistry: { isOnline(id: string): boolean }, agents: Array<{ id: string; name: string; command: string }>): string {
+    const lines: string[] = []
+
+    lines.push('**🟢 Agent 状态**')
+    lines.push('')
+
+    for (const agent of agents) {
+      const online = agentRegistry.isOnline(agent.id)
+      const icon = online ? '🟢' : '🔴'
+      const status = online ? '在线' : '离线'
+      lines.push(`  ${icon} **#${agent.command}** — ${agent.name}（${status}）`)
     }
-    return `🟢 **Bot 在线**\n📱 \`${accountId || '未知'}\``
+
+    if (agents.length === 0) {
+      lines.push('  暂无 Agent')
+    }
+
+    return lines.join('\n')
   }
 }

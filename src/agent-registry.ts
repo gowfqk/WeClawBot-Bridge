@@ -28,6 +28,11 @@ export class AgentRegistry {
     this.wsAgentServer = server
   }
 
+  /** 检查 Agent 是否在线 */
+  isOnline(agentId: string): boolean {
+    return this.wsAgentServer?.isOnline(agentId) ?? false
+  }
+
   register(config: AgentConfig): void {
     const previous = this.agents.get(config.id)
     if (previous) {

@@ -48,8 +48,8 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
       }
 
       if (result.type === 'status') {
-        const status = botManager.getStatus()
-        await reply(commandHandler.getStatusMessage(status.loggedIn, status.accountId))
+        const agents = agentRegistry.listAll()
+        await reply(commandHandler.getStatusMessage(agentRegistry, agents))
         return
       }
 
