@@ -14,6 +14,7 @@ export function rateLimitMiddleware(maxRequests: number = 60, windowMs: number =
       }
     }
   }, windowMs)
+  cleanupTimer.unref?.()
 
   const middleware = (req: Request, res: Response, next: NextFunction): void => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown'

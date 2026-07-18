@@ -15,6 +15,7 @@ import type { Logger } from 'pino'
 import { loggingMiddleware } from './middleware/logging'
 import { SessionAuth } from './middleware/session-auth'
 import { csrfOriginMiddleware } from './middleware/csrf'
+import { rateLimitMiddleware } from './middleware/rate-limit'
 import { getMetrics, botStatus } from './metrics'
 import { SINGLE_USER_ID, normalizeUserId } from './single-user'
 import { generateWsToken, resolveWsToken, syncWsAgentToken } from './ws-token'
@@ -39,6 +40,9 @@ export function createServer(
   wsAgentServer?: WsAgentServer,
 ) {
   const app = express()
+
+  const isLoopbackAddress = (ip: string | undefined): boolean =>
+    ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
 
   // Only trust forwarding headers when deployment explicitly opts in. Public direct
   // access must not be able to spoof X-Forwarded-For and bypass rate limiting.
@@ -100,8 +104,17 @@ export function createServer(
   const dynamicAuth = async (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction): Promise<void> => {
     const passwordSet = await sessionAuth.isPasswordSet()
     if (!passwordSet) {
-      // 未设置密码，直接放行
-      next()
+      // A fresh public deployment must not expose its management APIs before
+      // an administrator has established a password. Initial setup is limited
+      // to the local host; public deployments must set API_KEY first.
+      if (req.path === '/api/auth/setup' && isLoopbackAddress(req.ip)) {
+        next()
+        return
+      }
+      res.status(503).json({
+        error: '管理密码尚未初始化。请从本机访问 /api/auth/setup，或设置 API_KEY 后重启服务。',
+        code: 'INITIAL_SETUP_REQUIRED',
+      })
       return
     }
     // 优先从 HttpOnly Cookie 读取，其次从 Authorization header 读取
@@ -186,7 +199,11 @@ export function createServer(
   }
 
   // ===== 认证 API =====
-  app.post('/api/auth/login', async (req, res) => {
+  // Login and setup are intentionally unauthenticated, so limit brute-force
+  // and setup-race attempts independently from the general API limit.
+  const authRateLimit = rateLimitMiddleware(10, 15 * 60 * 1000)
+
+  app.post('/api/auth/login', authRateLimit, async (req, res) => {
     const v = validate(LoginSchema, req.body)
     if (!v.ok) { res.status(400).json({ error: v.error }); return }
     const { password } = v.data
@@ -235,11 +252,15 @@ export function createServer(
     res.json({ authenticated: result.valid, passwordSet: true })
   })
 
-  app.post('/api/auth/setup', async (req, res) => {
+  app.post('/api/auth/setup', authRateLimit, async (req, res) => {
     // 首次设置密码（仅在未设置时允许）
     const passwordSet = await sessionAuth.isPasswordSet()
     if (passwordSet) {
       res.status(403).json({ error: '密码已设置，请使用修改密码接口' })
+      return
+    }
+    if (!isLoopbackAddress(req.ip)) {
+      res.status(403).json({ error: '首次设置密码只能从本机访问；公网部署请设置 API_KEY 后重启服务。' })
       return
     }
 
@@ -399,7 +420,7 @@ export function createServer(
         agentRegistry.register(agent)
       }
       commandHandler.updateAgents(agentRegistry.listAll())
-      await saveAgents(agentRegistry.listAll(), backup.defaultAgentId || config.defaultAgentId, storage)
+      await saveAgents(agentRegistry.listAll(), backup.defaultAgentId || config.defaultAgentId, storage, !config.encryptionKey)
 
       // 导入会话配置
       if (backup.session) {
@@ -482,7 +503,7 @@ export function createServer(
       if (!v.ok) { res.status(400).json({ error: v.error }); return }
       agentRegistry.register(v.data)
       commandHandler.updateAgents(agentRegistry.listAll())
-      await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage)
+      await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage, !config.encryptionKey)
       res.status(201).json(v.data)
     } catch (err) {
       const error = err as Error
@@ -509,7 +530,7 @@ export function createServer(
       agentRegistry.register(v.data)
       if (wsAgentServer) syncWsAgentToken(v.data, wsAgentServer)
       commandHandler.updateAgents(agentRegistry.listAll())
-      await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage)
+      await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage, !config.encryptionKey)
       res.json(v.data)
     } catch (err) {
       const error = err as Error
@@ -524,7 +545,7 @@ export function createServer(
       if (!agent) { res.status(404).json({ error: 'No agent with empty ID' }); return }
       agentRegistry.unregister('')
       commandHandler.updateAgents(agentRegistry.listAll())
-      await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage)
+      await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage, !config.encryptionKey)
       res.json({ ok: true })
     } catch (err) {
       const error = err as Error
@@ -539,7 +560,7 @@ export function createServer(
       agentRegistry.unregister(agentId)
       if (wsAgentServer && existing?.type === 'ws-remote') wsAgentServer.removeAgentToken(agentId)
       commandHandler.updateAgents(agentRegistry.listAll())
-      await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage)
+      await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage, !config.encryptionKey)
       res.json({ ok: true })
     } catch (err) {
       const error = err as Error
@@ -596,7 +617,7 @@ export function createServer(
       agentId,
       wsAgentServer,
       agentRegistry,
-      () => saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage),
+      () => saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage, !config.encryptionKey),
     ).then(token => res.json({ agentId, token })).catch(err => {
       logger.error({ agentId, err: (err as Error).message }, '保存 WS Agent Token 失败')
       res.status(500).json({ error: 'Token 保存失败' })

@@ -430,9 +430,16 @@ export class WsAgentServer {
       }
 
       case 'error': {
-        // Agent 处理异常通知
+        // Agent 处理异常。A correlated error must complete the pending
+        // request; otherwise callers wait until their full timeout expires.
         const errMsg = msg as WsErrorMessage
         log.warn({ agentId, id: errMsg.id, reason: errMsg.reason }, 'WS Agent 报告处理异常')
+        const pending = errMsg.id ? conn.pendingRequests.get(errMsg.id) : undefined
+        if (pending) {
+          clearTimeout(pending.timer)
+          conn.pendingRequests.delete(errMsg.id!)
+          pending.reject(new Error(`Agent 错误: ${errMsg.reason || '未知错误'}`))
+        }
         break
       }
 

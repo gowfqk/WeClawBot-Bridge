@@ -20,7 +20,10 @@ async function main(): Promise<void> {
     ? new FileStorage(config.storageDir, 'gateway')
     : new MemoryStorage()
 
-  const botStorage = config.encryptionKey
+  // All persistent application state can contain credentials or conversation
+  // content. Keep it behind the same encryption boundary, not only WeChat SDK
+  // credentials.
+  const storage = config.encryptionKey
     ? new EncryptedStorage(rawStorage, config.encryptionKey)
     : rawStorage
 
@@ -29,21 +32,21 @@ async function main(): Promise<void> {
     logger.warn('   生成方法：node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"')
   }
 
-  const userState = new UserStateManager(rawStorage, config.defaultAgentId)
+  const userState = new UserStateManager(storage, config.defaultAgentId)
 
   const commandHandler = new CommandHandler()
 
   const agentRegistry = new AgentRegistry()
 
   const sessionManager = new SessionManager(
-    rawStorage,
+    storage,
     config.sessionMaxRounds,
     config.sessionExpireMs,
   )
 
-  const botManager = new BotManager(botStorage, 'WeChatAgentGateway/1.0')
+  const botManager = new BotManager(storage, 'WeChatAgentGateway/1.0')
 
-  const notificationService = new NotificationService(botManager, rawStorage)
+  const notificationService = new NotificationService(botManager, storage)
   await notificationService.loadRules()
 
   for (const agent of config.agents) {
@@ -51,7 +54,7 @@ async function main(): Promise<void> {
   }
 
   // 优先从 Storage 加载 Agent（跨部署持久化，覆盖文件中的默认值）
-  await loadAgentsFromStorage(rawStorage)
+  await loadAgentsFromStorage(storage)
   const storageAgents = config.agents
   if (storageAgents.length > 0) {
     // 清除文件加载的，用 Storage 中的覆盖
@@ -68,7 +71,7 @@ async function main(): Promise<void> {
   // 首次启动时将文件中的 Agent 同步到 Storage（确保跨部署持久化）
   if (agentRegistry.listAll().length > 0) {
     const { saveAgents } = await import('./config')
-    await saveAgents(agentRegistry.listAll(), config.defaultAgentId, rawStorage)
+    await saveAgents(agentRegistry.listAll(), config.defaultAgentId, storage, !config.encryptionKey)
   }
 
   const messageHandler = createMessageHandler({
@@ -83,7 +86,7 @@ async function main(): Promise<void> {
 
   // ===== WS Agent Server：接受 Agent 主动接入 =====
   const wsAgentServer = new WsAgentServer({
-    storage: rawStorage,
+    storage,
     onAgentConnect: (agentId, info) => {
       logger.info({ agentId, name: info.name, command: info.command }, 'WS Agent 已上线')
       // 动态注册为 ws-remote 类型 Agent。保留面板里已配置的 timeout/model 等字段，
@@ -135,7 +138,7 @@ async function main(): Promise<void> {
     agentRegistry,
     commandHandler,
     notificationService,
-    rawStorage,
+    storage,
     sessionManager,
     logger,
     wsAgentServer,

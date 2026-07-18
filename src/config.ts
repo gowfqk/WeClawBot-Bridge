@@ -109,7 +109,12 @@ export async function loadAgentsFromStorage(storage: { get: <T>(key: string) => 
   }
 }
 
-export async function saveAgents(agents: AgentConfig[], defaultAgentId?: string, storage?: { set: (key: string, value: unknown) => Promise<void> }): Promise<void> {
+export async function saveAgents(
+  agents: AgentConfig[],
+  defaultAgentId?: string,
+  storage?: { set: (key: string, value: unknown) => Promise<void> },
+  writePlaintextFallback: boolean = true,
+): Promise<void> {
   const data = { agents, defaultAgentId }
 
   // 优先写入 Storage（跨部署持久化）
@@ -117,16 +122,18 @@ export async function saveAgents(agents: AgentConfig[], defaultAgentId?: string,
     await storage.set('config:agents', data)
   }
 
-  // 同时写入文件（作为本地 fallback）
-  if (!cachedAgentsPath) {
-    cachedAgentsPath = resolveAgentsPath()
-  }
-  try {
-    const dir = path.dirname(cachedAgentsPath)
-    await fs.promises.mkdir(dir, { recursive: true })
-    await fs.promises.writeFile(cachedAgentsPath, JSON.stringify(data, null, 2), 'utf-8')
-  } catch {
-    // 文件写入失败不影响运行（Docker 只读文件系统等场景）
+  if (writePlaintextFallback) {
+    // 同时写入文件（作为本地 fallback）
+    if (!cachedAgentsPath) {
+      cachedAgentsPath = resolveAgentsPath()
+    }
+    try {
+      const dir = path.dirname(cachedAgentsPath)
+      await fs.promises.mkdir(dir, { recursive: true })
+      await fs.promises.writeFile(cachedAgentsPath, JSON.stringify(data, null, 2), 'utf-8')
+    } catch {
+      // 文件写入失败不影响运行（Docker 只读文件系统等场景）
+    }
   }
 
   if (cachedConfig) {

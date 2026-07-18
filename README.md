@@ -35,7 +35,7 @@ cd frontend && npm install && cd ..
 
 ```bash
 cp .env.example .env
-# 编辑 .env，按需修改端口和密钥
+# 编辑 .env。公网部署必须设置 API_KEY 和 ENCRYPTION_KEY。
 ```
 
 ### 3. 构建并启动
@@ -55,7 +55,7 @@ node dist/index.js
 PORT=5000 npm run dev
 ```
 
-启动后访问 `http://localhost:3000` 进入管理面板，首次访问需设置管理密码。
+启动后访问 `http://localhost:3000` 进入管理面板。未设置 `API_KEY` 时，首次密码只能从 Bridge 所在主机设置；公网部署请在启动前设置 `API_KEY`。
 
 ### 4. 登录微信 Bot
 
@@ -159,14 +159,16 @@ docker run -d \
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `PORT` | 服务端口 | `3000` |
-| `API_KEY` | 管理面板密码 | 首次访问时设置 |
-| `ENCRYPTION_KEY` | 凭证加密密钥（32 字节十六进制） | 无 |
+| `API_KEY` | 管理面板密码；公网部署时必填 | 本机首次访问时设置 |
+| `ENCRYPTION_KEY` | 加密所有持久化凭证、Agent 配置、会话和通知数据的 32 字节十六进制密钥 | 无 |
 | `STORAGE_DIR` | 数据存储目录 | `.wechatbot-gateway` |
 | `LOG_LEVEL` | 日志级别 | `info` |
 | `SESSION_MAX_ROUNDS` | 会话最大轮次，`0` = 不限制 | `0` |
 | `SESSION_EXPIRE_MS` | 会话过期时间（毫秒），`0` = 永不过期 | `0` |
 | `ALLOWED_ORIGINS` | CORS 允许的源（逗号分隔） | `http://localhost:3000` |
 | `WEBHOOK_SECRET` | Webhook 密钥，设置后需 `X-Webhook-Secret` 头认证 | 无（回退到 Bearer Token） |
+
+> 升级提示：启用 `ENCRYPTION_KEY` 后，Bridge 会在读取旧的结构化存储记录时迁移它们。确认服务正常运行后，删除旧的 `$STORAGE_DIR/agents.json`（或默认的 `config/agents.json`）副本，避免历史明文 API Key 留在磁盘上。
 
 ## 📡 API 端点
 

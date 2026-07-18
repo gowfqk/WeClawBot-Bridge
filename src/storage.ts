@@ -159,10 +159,29 @@ export class EncryptedStorage implements Storage {
   }
 
   async get<T>(key: string): Promise<T | undefined> {
-    const encrypted = await this.inner.get<string>(key)
-    if (encrypted === undefined) return undefined
-    const decrypted = this.decrypt(encrypted)
-    return JSON.parse(decrypted) as T
+    const stored = await this.inner.get<unknown>(key)
+    if (stored === undefined) return undefined
+
+    if (typeof stored === 'string') {
+      try {
+        return JSON.parse(this.decrypt(stored)) as T
+      } catch {
+        // The prior implementation encrypted only WeChat SDK data. Existing
+        // structured Bridge records were stored in plaintext, so retain a
+        // narrow compatibility path for legacy bcrypt password hashes.
+        if (/^\$2[aby]\$\d{2}\$/.test(stored)) {
+          await this.set(key, stored)
+          return stored as T
+        }
+        throw new Error(`Unable to decrypt storage key "${key}"`)
+      }
+    }
+
+    // Existing object/array records predate full-storage encryption. Migrate
+    // them on their first read without treating arbitrary encrypted strings as
+    // plaintext when an incorrect key is configured.
+    await this.set(key, stored)
+    return stored as T
   }
 
   async set<T>(key: string, value: T): Promise<void> {

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from 'vitest'
-import { MemoryStorage, FileStorage } from './storage'
+import { MemoryStorage, FileStorage, EncryptedStorage } from './storage'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
@@ -63,5 +63,28 @@ describe('FileStorage', () => {
 
   afterAll(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+  })
+})
+
+describe('EncryptedStorage migration', () => {
+  const key = 'a'.repeat(64)
+
+  it('migrates legacy structured records when they are first read', async () => {
+    const raw = new MemoryStorage()
+    await raw.set('config:agents', { agents: [{ id: 'legacy' }] })
+    const encrypted = new EncryptedStorage(raw, key)
+
+    expect(await encrypted.get('config:agents')).toEqual({ agents: [{ id: 'legacy' }] })
+    expect(typeof await raw.get('config:agents')).toBe('string')
+  })
+
+  it('keeps legacy bcrypt password hashes usable during migration', async () => {
+    const raw = new MemoryStorage()
+    const hash = '$2b$10$abcdefghijklmnopqrstuuC6U14Ri6Qa.WvRld.S7VSBk2kriH3.O'
+    await raw.set('config:api_key_hash', hash)
+    const encrypted = new EncryptedStorage(raw, key)
+
+    expect(await encrypted.get('config:api_key_hash')).toBe(hash)
+    expect(typeof await raw.get('config:api_key_hash')).toBe('string')
   })
 })
