@@ -88,9 +88,9 @@ PORT=5000 npm run dev
 **WS Remote Agent（插件接入）：**
 
 1. 类型选择 **WS Remote (插件接入)**，填写 ID、名称和切换命令；
-2. 从“接入方式”选择 **Hermes / OpenClaw / QwenPaw**；
-3. 点击「生成 Token」，复制当前平台对应的安装命令；
-4. 在 Agent 端执行安装命令并重启对应服务。列表中的「Token」按钮可随时查看 Token 与重新复制对应平台的命令。
+2. 从“接入方式”选择专用 Channel 插件（**Hermes / OpenClaw / QwenPaw**），或通用 SDK（**Claude Code / OpenCode / Codex CLI**）；
+3. 点击「生成 Token」，复制当前接入方式对应的安装命令；
+4. 在 Agent 端执行安装命令并重启对应服务。列表中的「Token」按钮可随时查看 Token 与重新复制对应命令。
 
 ### 接入 Hermes / OpenClaw / QwenPaw
 

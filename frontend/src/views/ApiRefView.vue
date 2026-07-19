@@ -83,16 +83,16 @@
               </n-tab-pane>
 
               <n-tab-pane name="ws-remote" tab="WS Remote 插件接入">
-                <n-text>Hermes、OpenClaw 和 QwenPaw 通过各自的 Channel 插件主动连接 Bridge，无需暴露 Agent 的 HTTP 服务：</n-text>
+                <n-text>可使用 Hermes、OpenClaw、QwenPaw 的专用 Channel 插件，或使用通用 SDK 接入 Claude Code、OpenCode、Codex CLI；它们都会主动连接 Bridge，无需暴露 Agent 的 HTTP 服务：</n-text>
                 <n-ol style="margin-top: 12px">
                   <n-li>
                     <n-text strong>添加 Agent</n-text> — 类型选 <n-text code>WS Remote (插件接入)</n-text>，填写 ID、名称和切换命令。
                   </n-li>
                   <n-li>
-                    <n-text strong>选择接入方式</n-text> — 在表单或列表的「Token」弹窗中选择 <n-text code>Hermes</n-text>、<n-text code>OpenClaw</n-text> 或 <n-text code>QwenPaw</n-text>。
+                    <n-text strong>选择接入方式</n-text> — 在表单或列表的「Token」弹窗中选择 <n-text code>Hermes</n-text>、<n-text code>OpenClaw</n-text>、<n-text code>QwenPaw</n-text>，或 <n-text code>Claude Code</n-text>、<n-text code>OpenCode</n-text>、<n-text code>Codex CLI</n-text>。
                   </n-li>
                   <n-li>
-                    <n-text strong>生成 Token 并安装</n-text> — 点击「生成 Token」，复制当前平台对应的安装命令；命令会自动带入 Bridge 地址、Agent ID 和 Token。
+                    <n-text strong>生成 Token 并安装</n-text> — 点击「生成 Token」，复制当前接入方式对应的安装命令；命令会自动带入 Bridge 地址、Agent ID 和 Token。
                   </n-li>
                   <n-li>
                     <n-text strong>重启 Agent 服务</n-text> — 连接成功后，Agent 管理列表会显示「在线」。

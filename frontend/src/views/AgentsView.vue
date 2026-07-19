@@ -338,13 +338,16 @@ const testResult = ref<{ text: string; elapsed: number } | null>(null)
 
 // WS Remote: token 生成与接入指引（仅用于前端展示，不写入 Agent 配置）
 const tokenGenerating = ref(false)
-type WsIntegration = 'hermes' | 'openclaw' | 'qwenpaw'
+type WsIntegration = 'hermes' | 'openclaw' | 'qwenpaw' | 'claude-code' | 'opencode' | 'codex'
 const wsIntegration = ref<WsIntegration>('hermes')
 
 const wsIntegrationOptions = [
   { label: 'Hermes', value: 'hermes' },
   { label: 'OpenClaw', value: 'openclaw' },
   { label: 'QwenPaw', value: 'qwenpaw' },
+  { label: 'Claude Code（通用 SDK）', value: 'claude-code' },
+  { label: 'OpenCode（通用 SDK）', value: 'opencode' },
+  { label: 'Codex CLI（通用 SDK）', value: 'codex' },
 ]
 
 type IntegrationGuide = { product: string; title: string; summary: string; steps: string[] }
@@ -379,6 +382,33 @@ function getIntegrationGuide(integration: WsIntegration): IntegrationGuide {
         'Agent Name 与 Command Alias 留空，以 Bridge 面板配置为准。',
       ],
     },
+    'claude-code': {
+      product: 'Claude Code',
+      title: 'Claude Code 接入指引',
+      summary: '使用通用 WeClawBot Agent SDK，把微信消息交给本机 Claude Code CLI。',
+      steps: [
+        '执行下方命令安装 SDK 并生成 agent-claude.js。',
+        '确认 claude CLI 已登录，然后执行 node agent-claude.js 保持进程运行。',
+      ],
+    },
+    opencode: {
+      product: 'OpenCode',
+      title: 'OpenCode 接入指引',
+      summary: '使用通用 WeClawBot Agent SDK，把微信消息交给本机 OpenCode CLI。',
+      steps: [
+        '执行下方命令安装 SDK 并生成 agent-opencode.js。',
+        '确认 opencode CLI 可用，然后执行 node agent-opencode.js 保持进程运行。',
+      ],
+    },
+    codex: {
+      product: 'Codex CLI',
+      title: 'Codex CLI 接入指引',
+      summary: '使用通用 WeClawBot Agent SDK，把微信消息交给本机 Codex CLI。',
+      steps: [
+        '执行下方命令安装 SDK 并生成 agent-codex.js。',
+        '确认 codex CLI 已登录，然后执行 node agent-codex.js 保持进程运行。',
+      ],
+    },
   }
   return guides[integration]
 }
@@ -406,6 +436,37 @@ function buildIntegrationInstallCmd(integration: WsIntegration, agentId: string,
       'openclaw plugins install --link "$(pwd)"',
       'openclaw config set plugins.entries.weclawbot.enabled true',
       `WECLAWBOT_TOKEN='${wsToken}' WECLAWBOT_BRIDGE_URL='${bridgeUrl}' WECLAWBOT_AGENT_ID='${id}' openclaw gateway restart`,
+    ].join('\n')
+  }
+
+  if (integration === 'claude-code' || integration === 'opencode' || integration === 'codex') {
+    const configs = {
+      'claude-code': { file: 'agent-claude.js', command: 'claude', args: "['-p', msg.text, '--output-format', 'text']", timeout: 120000, cwd: '' },
+      opencode: { file: 'agent-opencode.js', command: 'opencode', args: "['run', msg.text]", timeout: 300000, cwd: ", cwd: '/root'" },
+      codex: { file: 'agent-codex.js', command: 'codex', args: "['exec', msg.text]", timeout: 300000, cwd: '' },
+    } as const
+    const config = configs[integration]
+    return [
+      'npm install weclawbot-agent-plugin',
+      `cat > ${config.file} <<'EOF'`,
+      "const { WeClawBotAgent } = require('weclawbot-agent-plugin')",
+      "const { execFileSync } = require('child_process')",
+      '',
+      'const agent = new WeClawBotAgent({',
+      `  bridgeUrl: '${bridgeUrl}',`,
+      `  agentId: '${id}',`,
+      `  token: '${wsToken}',`,
+      '}, (status) => console.log(\'状态:\', status))',
+      '',
+      'agent.onMessage((msg) => {',
+      `  const out = execFileSync('${config.command}', ${config.args},`,
+      `    { timeout: ${config.timeout}, maxBuffer: 10 * 1024 * 1024${config.cwd} })`,
+      "  return { text: out.toString().trim() || '(无输出)' }",
+      '})',
+      '',
+      'agent.connect()',
+      'EOF',
+      `node ${config.file}`,
     ].join('\n')
   }
 
