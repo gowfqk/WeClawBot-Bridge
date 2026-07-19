@@ -177,7 +177,7 @@
     </n-card>
 
     <!-- Token 查看弹窗 -->
-    <n-modal v-model:show="tokenModalVisible" preset="card" title="Agent Token" style="max-width: 600px" :mask-closable="true" @update:show="(v: boolean) => { if (!v) tokenModalAgent = null }">
+    <n-modal v-model:show="tokenModalVisible" preset="card" title="Agent Token" style="width: min(760px, calc(100vw - 32px))" content-style="max-height: calc(100vh - 160px); overflow-y: auto" :mask-closable="true" @update:show="(v: boolean) => { if (!v) tokenModalAgent = null }">
       <n-spin :show="tokenModalLoading">
         <template v-if="tokenModalAgent && tokenModalValue">
           <n-descriptions :column="1" label-placement="left" size="small" bordered>
@@ -187,19 +187,26 @@
             <n-descriptions-item label="Token">
               <n-input-group>
                 <n-input :value="tokenModalValue" readonly />
-                <n-button type="primary" @click="copyTokenToClipboard">
-                  📋
-                </n-button>
+                <n-button type="primary" @click="copyTokenToClipboard">📋</n-button>
               </n-input-group>
             </n-descriptions-item>
             <n-descriptions-item label="Bridge 地址">
               <n-code>{{ bridgeWsUrl }}</n-code>
             </n-descriptions-item>
           </n-descriptions>
+
           <n-form-item label="接入方式" style="margin-top: 16px">
-            <n-select v-model:value="tokenModalIntegration" :options="wsIntegrationOptions" style="max-width: 300px" />
+            <n-select v-model:value="tokenModalIntegration" :options="wsIntegrationOptions" style="max-width: 320px" />
           </n-form-item>
-          <n-code :code="tokenModalInstallCmd" language="bash" word-break style="display: block" />
+          <n-alert type="info" :title="tokenModalGuide.title">
+            <div style="line-height: 1.8">
+              {{ tokenModalGuide.summary }}
+              <ol style="margin: 8px 0 0; padding-left: 20px">
+                <li v-for="step in tokenModalGuide.steps" :key="step">{{ step }}</li>
+              </ol>
+            </div>
+          </n-alert>
+          <n-code :code="tokenModalInstallCmd" language="bash" word-break style="display: block; margin-top: 12px" />
           <n-button type="primary" block style="margin-top: 8px" @click="copyIntegrationInstallCmd(tokenModalInstallCmd)">
             📋 复制 {{ tokenModalGuide.product }} 安装命令
           </n-button>
@@ -359,8 +366,8 @@ function getIntegrationGuide(integration: WsIntegration): IntegrationGuide {
       title: 'Hermes 接入指引',
       summary: '在 Hermes Gateway 中安装并启用 WeClawBot Channel Adapter。',
       steps: [
-        '执行下方命令安装 Hermes 插件，并写入 Bridge 连接配置。',
-        '重启 hermes-gateway.service，日志出现 authenticated to Bridge 即完成接入。',
+        '执行下方命令安装 Hermes 插件，并将 Bridge 凭据写入仅 root 可读的环境文件。',
+        '命令会创建 systemd drop-in，使 hermes-gateway.service 在启动时自动加载凭据并重启服务。',
       ],
     },
     openclaw: {
@@ -369,6 +376,7 @@ function getIntegrationGuide(integration: WsIntegration): IntegrationGuide {
       summary: '安装并启用 openclaw-weclawbot-channel 插件。',
       steps: [
         '执行下方命令安装、构建并启用 OpenClaw 插件。',
+        '将下方 JSON 合并到 OpenClaw 配置文件的 channels 中（或使用环境变量配置）。',
         '重启 OpenClaw Gateway，日志出现 authenticated as agent 即完成接入。',
       ],
     },
@@ -425,17 +433,45 @@ function buildIntegrationInstallCmd(integration: WsIntegration, agentId: string,
       'cp hermes-weclawbot-channel/plugin.yaml ~/.hermes/plugins/weclawbot/',
       'cp hermes-weclawbot-channel/src/adapter.py ~/.hermes/plugins/weclawbot/__init__.py',
       'hermes plugins enable weclawbot',
-      `WECLAWBOT_TOKEN='${wsToken}' WECLAWBOT_BRIDGE_URL='${bridgeUrl}' WECLAWBOT_AGENT_ID='${id}' hermes gateway restart`,
+      '',
+      'mkdir -p /root/.config',
+      "cat > /root/.config/weclawbot-adapter.env <<'ENV'",
+      `WECLAWBOT_TOKEN=${wsToken}`,
+      `WECLAWBOT_BRIDGE_URL=${bridgeUrl}`,
+      `WECLAWBOT_AGENT_ID=${id}`,
+      'ENV',
+      'chmod 600 /root/.config/weclawbot-adapter.env',
+      '',
+      'mkdir -p /etc/systemd/system/hermes-gateway.service.d',
+      "cat > /etc/systemd/system/hermes-gateway.service.d/weclawbot-adapter.conf <<'EOF'",
+      '[Service]',
+      'EnvironmentFile=/root/.config/weclawbot-adapter.env',
+      'EOF',
+      'systemctl daemon-reload',
+      'systemctl restart hermes-gateway.service',
     ].join('\n')
   }
 
   if (integration === 'openclaw') {
+    const config = JSON.stringify({
+      channels: {
+        weclawbot: {
+          enabled: true,
+          token: wsToken,
+          bridgeUrl,
+          agentId: id,
+        },
+      },
+    }, null, 2)
     return [
       'git clone https://github.com/gowfqk/openclaw-weclawbot-channel.git',
       'cd openclaw-weclawbot-channel && npm install && npm run build',
       'openclaw plugins install --link "$(pwd)"',
-      'openclaw config set plugins.entries.weclawbot.enabled true',
-      `WECLAWBOT_TOKEN='${wsToken}' WECLAWBOT_BRIDGE_URL='${bridgeUrl}' WECLAWBOT_AGENT_ID='${id}' openclaw gateway restart`,
+      '',
+      '# 将以下内容合并到 OpenClaw 配置文件：',
+      config,
+      '',
+      'openclaw gateway restart',
     ].join('\n')
   }
 
