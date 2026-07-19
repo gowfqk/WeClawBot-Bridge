@@ -105,6 +105,28 @@
             </n-tabs>
           </n-card>
 
+          <!-- OpenAI 兼容 API -->
+          <n-card id="doc-openai" title="🔗 OpenAI 兼容 API">
+            <n-text>可将 Bridge 作为 OpenAI 兼容服务接入任意支持 Chat Completions 的客户端。请求中的 <n-text code>model</n-text> 是管理面板配置的 <n-text strong>Agent ID</n-text>，用于选择目标 Agent，而非底层模型名。</n-text>
+            <n-ul style="margin-top: 12px">
+              <n-li><n-text code>GET /v1/models</n-text> — 列出可用 Agent ID。</n-li>
+              <n-li><n-text code>POST /v1/chat/completions</n-text> — 通过 <n-text code>model</n-text> 调用指定 HTTP、CLI 或 WS Remote Agent。</n-li>
+              <n-li>使用 Bridge 的 <n-text code>API_KEY</n-text> 或管理密码作为 <n-text code>Authorization: Bearer</n-text>；不要使用管理面板登录会话 Token。</n-li>
+            </n-ul>
+            <n-code
+              language="bash"
+              :code="`curl https://your-domain/v1/chat/completions \\
+  -H \"Authorization: Bearer $API_KEY\" \\
+  -H \"Content-Type: application/json\" \\
+  -d '{\n    \"model\": \"hermes\",\n    \"messages\": [{\"role\": \"user\", \"content\": \"你好\"}]\n  }'`"
+              word-break
+              style="display: block; margin-top: 12px"
+            />
+            <n-text depth="3" style="display: block; margin-top: 8px">
+              支持 <n-text code>stream: true</n-text>（OpenAI SSE 格式）。可选 <n-text code>user</n-text> 用于隔离调用方会话；同一 user 和 Agent ID 会共享上下文。
+            </n-text>
+          </n-card>
+
           <!-- 会话管理 -->
           <n-card id="doc-sessions" title="📝 会话管理">
             <n-text>单用户模式下，每个 Agent 独立维护对话历史：</n-text>
@@ -199,6 +221,7 @@ const tocMenuOptions: MenuOption[] = [
   { label: '🚀 快速上手', key: 'doc-quickstart' },
   { label: '💬 微信命令', key: 'doc-commands' },
   { label: '🤖 Agent 类型', key: 'doc-agent-types' },
+  { label: '🔗 OpenAI 兼容 API', key: 'doc-openai' },
   { label: '📝 会话管理', key: 'doc-sessions' },
   { label: '📢 通知与 Webhook', key: 'doc-notify' },
   { label: '🔌 WS Agent 状态', key: 'doc-ws-status' },
