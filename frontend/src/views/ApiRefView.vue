@@ -113,15 +113,7 @@
               <n-li><n-text code>POST /v1/chat/completions</n-text> — 通过 <n-text code>model</n-text> 调用指定 HTTP、CLI 或 WS Remote Agent。</n-li>
               <n-li>使用 Bridge 的 <n-text code>API_KEY</n-text> 或管理密码作为 <n-text code>Authorization: Bearer</n-text>；不要使用管理面板登录会话 Token。</n-li>
             </n-ul>
-            <n-code
-              language="bash"
-              :code="`curl https://your-domain/v1/chat/completions \\
-  -H \"Authorization: Bearer $API_KEY\" \\
-  -H \"Content-Type: application/json\" \\
-  -d '{\n    \"model\": \"hermes\",\n    \"messages\": [{\"role\": \"user\", \"content\": \"你好\"}]\n  }'`"
-              word-break
-              style="display: block; margin-top: 12px"
-            />
+            <n-code language="bash" :code="openAiExample" word-break style="display: block; margin-top: 12px" />
             <n-text depth="3" style="display: block; margin-top: 8px">
               支持 <n-text code>stream: true</n-text>（OpenAI SSE 格式）。可选 <n-text code>user</n-text> 用于隔离调用方会话；同一 user 和 Agent ID 会共享上下文。
             </n-text>
@@ -216,6 +208,14 @@ import { ref } from 'vue'
 import type { MenuOption } from 'naive-ui'
 
 const activeSection = ref('doc-quickstart')
+
+const openAiExample = `curl https://your-domain/v1/chat/completions \\
+  -H "Authorization: Bearer $API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "hermes",
+    "messages": [{"role": "user", "content": "你好"}]
+  }'`
 
 const tocMenuOptions: MenuOption[] = [
   { label: '🚀 快速上手', key: 'doc-quickstart' },
