@@ -60,18 +60,26 @@
           <n-alert v-if="!form.id" type="warning" style="margin-bottom: 12px">
             请先填写 Agent ID，再生成 Token。
           </n-alert>
-          <n-alert v-if="wsInstallCmd" type="success" style="margin-bottom: 12px" title="✅ 安装命令（复制到 Agent 端执行）">
-            <n-code :code="wsInstallCmd" language="bash" word-break style="margin-top: 4px" />
-            <n-button size="small" type="primary" style="margin-top: 8px" @click="copyInstallCmd">
-              📋 复制安装命令
-            </n-button>
-          </n-alert>
-          <n-alert v-else type="info" style="margin-bottom: 12px">
-            WS Remote 类型：Agent 通过插件主动连接 Bridge，无需起 HTTP 服务。填写 ID 后点击「生成 Token」，获取安装命令。
-          </n-alert>
-          <n-form-item v-if="wsInstallCmd" label="模板">
-            <n-select v-model:value="wsPluginTemplate" :options="wsPluginTemplateOptions" style="max-width: 300px" @update:value="regenerateInstallCmd" />
+          <n-form-item label="接入方式">
+            <n-select v-model:value="wsIntegration" :options="wsIntegrationOptions" style="max-width: 300px" />
           </n-form-item>
+          <n-alert type="info" style="margin-bottom: 12px" :title="integrationGuide.title">
+            <div style="line-height: 1.8">
+              {{ integrationGuide.summary }}
+              <ol style="margin: 8px 0 0; padding-left: 20px">
+                <li v-for="step in integrationGuide.steps" :key="step">{{ step }}</li>
+              </ol>
+              <n-code :code="formIntegrationInstallCmd" language="bash" word-break style="display: block; margin-top: 10px" />
+              <n-button size="small" type="primary" style="margin-top: 8px" @click="copyIntegrationInstallCmd(formIntegrationInstallCmd)">
+                📋 复制 {{ integrationGuide.product }} 安装命令
+              </n-button>
+              <div style="margin-top: 8px">
+                Bridge 地址：<n-code>{{ bridgeWsUrl }}</n-code><br>
+                Agent ID：<n-code>{{ form.id || '填写 Agent ID 后显示' }}</n-code><br>
+                Token：<n-code>{{ form.apiKey || '生成 Token 后填入对应客户端' }}</n-code>
+              </div>
+            </div>
+          </n-alert>
         </template>
 
         <!-- WS 字段 -->
@@ -188,8 +196,12 @@
               <n-code>{{ bridgeWsUrl }}</n-code>
             </n-descriptions-item>
           </n-descriptions>
-          <n-button type="primary" block style="margin-top: 16px" @click="copyTokenModalCmd">
-            📋 复制完整安装命令
+          <n-form-item label="接入方式" style="margin-top: 16px">
+            <n-select v-model:value="tokenModalIntegration" :options="wsIntegrationOptions" style="max-width: 300px" />
+          </n-form-item>
+          <n-code :code="tokenModalInstallCmd" language="bash" word-break style="display: block" />
+          <n-button type="primary" block style="margin-top: 8px" @click="copyIntegrationInstallCmd(tokenModalInstallCmd)">
+            📋 复制 {{ tokenModalGuide.product }} 安装命令
           </n-button>
         </template>
         <n-empty v-else-if="!tokenModalLoading" description="未找到 Token，请先生成" />
@@ -283,7 +295,7 @@ const formRules = {
 const columns: DataTableColumns<Agent> = [
   { title: 'ID', key: 'id', width: 140, render: (row) => h('code', { style: 'font-size:13px' }, row.id) },
   { title: '名称', key: 'name', width: 160 },
-  { title: '命令', key: 'command', width: 120, render: (row) => h('code', {}, `/${row.command}`) },
+  { title: '命令', key: 'command', width: 120, render: (row) => h('code', {}, `#${row.command}`) },
   {
     title: '类型', key: 'type', width: 80,
     render: (row) => h(NTag, { type: row.type === 'http' ? 'info' : 'warning', size: 'small', round: true }, () => row.type.toUpperCase()),
@@ -324,25 +336,110 @@ const testMessage = ref('')
 const testLoading = ref(false)
 const testResult = ref<{ text: string; elapsed: number } | null>(null)
 
-// WS Remote: token 生成 & 安装命令
+// WS Remote: token 生成与接入指引（仅用于前端展示，不写入 Agent 配置）
 const tokenGenerating = ref(false)
-const wsInstallCmd = ref('')
-const wsPluginTemplate = ref('aibackend')
-const wsLastToken = ref('')
-const wsLastAgentId = ref('')
+type WsIntegration = 'hermes' | 'openclaw' | 'qwenpaw'
+const wsIntegration = ref<WsIntegration>('hermes')
 
-const wsPluginTemplateOptions = [
-  { label: 'AI Backend（零代码）', value: 'aibackend' },
-  { label: 'Claude Code', value: 'claude-code' },
-  { label: 'OpenCode', value: 'opencode' },
-  { label: 'Codex', value: 'codex' },
+const wsIntegrationOptions = [
+  { label: 'Hermes', value: 'hermes' },
+  { label: 'OpenClaw', value: 'openclaw' },
+  { label: 'QwenPaw', value: 'qwenpaw' },
 ]
+
+type IntegrationGuide = { product: string; title: string; summary: string; steps: string[] }
+
+function getIntegrationGuide(integration: WsIntegration): IntegrationGuide {
+  const guides: Record<WsIntegration, IntegrationGuide> = {
+    hermes: {
+      product: 'Hermes',
+      title: 'Hermes 接入指引',
+      summary: '在 Hermes Gateway 中安装并启用 WeClawBot Channel Adapter。',
+      steps: [
+        '执行下方命令安装 Hermes 插件，并写入 Bridge 连接配置。',
+        '重启 hermes-gateway.service，日志出现 authenticated to Bridge 即完成接入。',
+      ],
+    },
+    openclaw: {
+      product: 'OpenClaw',
+      title: 'OpenClaw 接入指引',
+      summary: '安装并启用 openclaw-weclawbot-channel 插件。',
+      steps: [
+        '执行下方命令安装、构建并启用 OpenClaw 插件。',
+        '重启 OpenClaw Gateway，日志出现 authenticated as agent 即完成接入。',
+      ],
+    },
+    qwenpaw: {
+      product: 'QwenPaw',
+      title: 'QwenPaw 接入指引',
+      summary: '在 QwenPaw 中安装 qwenpaw-weclawbot-channel 插件。',
+      steps: [
+        '执行下方命令安装插件，然后启动 QwenPaw。',
+        '在 QwenPaw 控制台“频道管理”添加 WeClawBot Bridge 频道，填写下方连接信息。',
+        'Agent Name 与 Command Alias 留空，以 Bridge 面板配置为准。',
+      ],
+    },
+  }
+  return guides[integration]
+}
+
+function buildIntegrationInstallCmd(integration: WsIntegration, agentId: string, token: string): string {
+  const bridgeUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/agent`
+  const id = agentId || '<Agent ID>'
+  const wsToken = token || '<Token>'
+
+  if (integration === 'hermes') {
+    return [
+      'git clone https://github.com/gowfqk/hermes-weclawbot-channel.git',
+      'mkdir -p ~/.hermes/plugins/weclawbot',
+      'cp hermes-weclawbot-channel/plugin.yaml ~/.hermes/plugins/weclawbot/',
+      'cp hermes-weclawbot-channel/src/adapter.py ~/.hermes/plugins/weclawbot/__init__.py',
+      'hermes plugins enable weclawbot',
+      `WECLAWBOT_TOKEN='${wsToken}' WECLAWBOT_BRIDGE_URL='${bridgeUrl}' WECLAWBOT_AGENT_ID='${id}' hermes gateway restart`,
+    ].join('\n')
+  }
+
+  if (integration === 'openclaw') {
+    return [
+      'git clone https://github.com/gowfqk/openclaw-weclawbot-channel.git',
+      'cd openclaw-weclawbot-channel && npm install && npm run build',
+      'openclaw plugins install --link "$(pwd)"',
+      'openclaw config set plugins.entries.weclawbot.enabled true',
+      `WECLAWBOT_TOKEN='${wsToken}' WECLAWBOT_BRIDGE_URL='${bridgeUrl}' WECLAWBOT_AGENT_ID='${id}' openclaw gateway restart`,
+    ].join('\n')
+  }
+
+  return [
+    'git clone https://github.com/gowfqk/qwenpaw-weclawbot-channel.git',
+    'qwenpaw plugin install ./qwenpaw-weclawbot-channel',
+    'qwenpaw app',
+    '',
+    '# 然后在 QwenPaw 控制台“频道管理”添加 WeClawBot Bridge 频道：',
+    `# Bridge URL: ${bridgeUrl}`,
+    `# Agent ID: ${id}`,
+    `# WS Token: ${wsToken}`,
+  ].join('\n')
+}
+
+const integrationGuide = computed(() => getIntegrationGuide(wsIntegration.value))
+const formIntegrationInstallCmd = computed(() =>
+  buildIntegrationInstallCmd(wsIntegration.value, form.value.id, form.value.apiKey || ''),
+)
 
 // WS Remote: 查看已有 Token
 const tokenModalAgent = ref<Agent | null>(null)
 const tokenModalVisible = ref(false)
 const tokenModalLoading = ref(false)
 const tokenModalValue = ref('')
+const tokenModalIntegration = ref<WsIntegration>('hermes')
+const tokenModalGuide = computed(() => getIntegrationGuide(tokenModalIntegration.value))
+const tokenModalInstallCmd = computed(() =>
+  buildIntegrationInstallCmd(
+    tokenModalIntegration.value,
+    tokenModalAgent.value?.id || '',
+    tokenModalValue.value,
+  ),
+)
 
 const bridgeWsUrl = computed(() =>
   `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/agent`
@@ -355,127 +452,17 @@ function copyTokenToClipboard() {
   )
 }
 
-function buildInstallCmd(agentId: string, token: string, name?: string, command?: string, template?: string): string {
-  const bridgeUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/agent`
-  const agentName = name || agentId
-  const agentCmd = command || agentId
-
-  if (template === 'claude-code') {
-    return [
-      `npm install weclawbot-agent-plugin`,
-      ``,
-      `// agent-claude.js — 保存此文件后 node agent-claude.js 启动`,
-      `const { WeClawBotAgent } = require('weclawbot-agent-plugin')`,
-      `const { execFileSync } = require('child_process')`,
-      ``,
-      `const agent = new WeClawBotAgent({`,
-      `  bridgeUrl: '${bridgeUrl}',`,
-      `  agentId: '${agentId}',`,
-      `  token: '${token}',`,
-      `  name: '${agentName}',`,
-      `  command: '${agentCmd}',`,
-      `}, (s) => console.log('状态:', s))`,
-      ``,
-      `agent.onMessage((msg) => {`,
-      `  const out = execFileSync('claude',`,
-      `    ['-p', msg.text, '--output-format', 'text'],`,
-      `    { timeout: 120000, maxBuffer: 10*1024*1024 })`,
-      `  return { text: out.toString().trim() || '(无输出)' }`,
-      `})`,
-      ``,
-      `agent.connect()`,
-    ].join('\n')
-  }
-
-  if (template === 'opencode') {
-    return [
-      `npm install weclawbot-agent-plugin`,
-      ``,
-      `// agent-opencode.js — 保存此文件后 node agent-opencode.js 启动`,
-      `const { WeClawBotAgent } = require('weclawbot-agent-plugin')`,
-      `const { execFileSync } = require('child_process')`,
-      ``,
-      `const agent = new WeClawBotAgent({`,
-      `  bridgeUrl: '${bridgeUrl}',`,
-      `  agentId: '${agentId}',`,
-      `  token: '${token}',`,
-      `  name: '${agentName}',`,
-      `  command: '${agentCmd}',`,
-      `}, (s) => console.log('状态:', s))`,
-      ``,
-      `agent.onMessage((msg) => {`,
-      `  const out = execFileSync('opencode',`,
-      `    ['run', msg.text],`,
-      `    { timeout: 300000, maxBuffer: 10*1024*1024, cwd: '/root' })`,
-      `  return { text: out.toString().trim() || '(无输出)' }`,
-      `})`,
-      ``,
-      `agent.connect()`,
-    ].join('\n')
-  }
-
-  if (template === 'codex') {
-    return [
-      `npm install weclawbot-agent-plugin`,
-      ``,
-      `// agent-codex.js — 保存此文件后 node agent-codex.js 启动`,
-      `const { WeClawBotAgent } = require('weclawbot-agent-plugin')`,
-      `const { execFileSync } = require('child_process')`,
-      ``,
-      `const agent = new WeClawBotAgent({`,
-      `  bridgeUrl: '${bridgeUrl}',`,
-      `  agentId: '${agentId}',`,
-      `  token: '${token}',`,
-      `  name: '${agentName}',`,
-      `  command: '${agentCmd}',`,
-      `}, (s) => console.log('状态:', s))`,
-      ``,
-      `agent.onMessage((msg) => {`,
-      `  const out = execFileSync('codex',`,
-      `    ['exec', msg.text],`,
-      `    { timeout: 300000, maxBuffer: 10*1024*1024 })`,
-      `  return { text: out.toString().trim() || '(无输出)' }`,
-      `})`,
-      ``,
-      `agent.connect()`,
-    ].join('\n')
-  }
-
-  // default: aibackend
-  return [
-    `npm install weclawbot-agent-plugin`,
-    ``,
-    `node -e "`,
-    `const { WeClawBotAgent } = require('weclawbot-agent-plugin');`,
-    `const agent = new WeClawBotAgent({`,
-    `  bridgeUrl: '${bridgeUrl}',`,
-    `  agentId: '${agentId}',`,
-    `  token: '${token}',`,
-    `  name: '${agentName}',`,
-    `  command: '${agentCmd}',`,
-    `  aiBackend: {`,
-    `    url: 'http://127.0.0.1:8642/v1',`,
-    `    apiKey: 'your-api-key',`,
-    `    format: 'openai',`,
-    `  },`,
-    `}, (status) => console.log('状态:', status));`,
-    `agent.connect();`,
-    `"`,
-  ].join('\n')
+function copyIntegrationInstallCmd(command: string) {
+  navigator.clipboard.writeText(command).then(
+    () => message.success('安装命令已复制'),
+    () => message.error('复制失败，请手动选中复制'),
+  )
 }
 
-function regenerateInstallCmd() {
-  if (wsLastAgentId.value && wsLastToken.value) {
-    wsInstallCmd.value = buildInstallCmd(
-      wsLastAgentId.value, wsLastToken.value,
-      form.value.name, form.value.command,
-      wsPluginTemplate.value
-    )
-  }
-}
 
 async function showTokenModal(agent: Agent) {
   tokenModalAgent.value = agent
+  tokenModalIntegration.value = 'hermes'
   tokenModalVisible.value = true
   tokenModalValue.value = ''
   tokenModalLoading.value = true
@@ -489,14 +476,7 @@ async function showTokenModal(agent: Agent) {
   }
 }
 
-function copyTokenModalCmd() {
-  if (!tokenModalAgent.value || !tokenModalValue.value) return
-  const cmd = buildInstallCmd(tokenModalAgent.value.id, tokenModalValue.value)
-  navigator.clipboard.writeText(cmd).then(
-    () => message.success('安装命令已复制'),
-    () => message.error('复制失败'),
-  )
-}
+
 
 async function handleGenerateToken() {
   if (!form.value.id) {
@@ -508,22 +488,12 @@ async function handleGenerateToken() {
     const agentId = form.value.id
     const res = await api.post<{ agentId: string; token: string }>(`/api/ws-agents/${agentId}/token`)
     form.value.apiKey = res.token
-    wsLastAgentId.value = agentId
-    wsLastToken.value = res.token
-    wsInstallCmd.value = buildInstallCmd(agentId, res.token, form.value.name, form.value.command, wsPluginTemplate.value)
-    message.success('Token 已生成，复制下方命令到 Agent 端即可接入')
+    message.success('Token 已生成，请按下方接入指引配置 Agent 端')
   } catch (e: any) {
     message.error(e.message || 'Token 生成失败')
   } finally {
     tokenGenerating.value = false
   }
-}
-
-function copyInstallCmd() {
-  navigator.clipboard.writeText(wsInstallCmd.value).then(
-    () => message.success('已复制到剪贴板'),
-    () => message.error('复制失败，请手动选中复制'),
-  )
 }
 
 async function loadAgents() {
@@ -565,10 +535,7 @@ function cancelEdit() {
   editingId.value = null
   form.value = defaultForm()
   cliArgsText.value = ''
-  wsInstallCmd.value = ''
-  wsLastToken.value = ''
-  wsLastAgentId.value = ''
-  wsPluginTemplate.value = 'aibackend'
+  wsIntegration.value = 'hermes'
 }
 
 async function handleSubmit() {
@@ -599,10 +566,7 @@ async function handleSubmit() {
           try {
             const res = await api.post<{ agentId: string; token: string }>(`/api/ws-agents/${payload.id}/token`)
             form.value.apiKey = res.token
-            wsLastAgentId.value = payload.id
-            wsLastToken.value = res.token
-            wsInstallCmd.value = buildInstallCmd(payload.id, res.token, payload.name, payload.command, wsPluginTemplate.value)
-            message.success('Agent 已添加，Token 已自动生成！复制下方命令到 Agent 端即可接入')
+            message.success('Agent 已添加，Token 已自动生成！请按下方接入指引配置 Agent 端')
           } catch {
             message.success('Agent 已添加，但 Token 自动生成失败，请手动点击「生成 Token」')
           }
