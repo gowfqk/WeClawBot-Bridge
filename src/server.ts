@@ -140,6 +140,172 @@ export function createServer(
     next()
   }
 
+  // ===== OpenAI-compatible API =====
+  // This API intentionally uses the configured API_KEY / management password as
+  // a Bearer token. It must not accept browser session cookies, because it is
+  // intended for programmatic OpenAI clients rather than the management UI.
+  const openAiAuth = async (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction): Promise<void> => {
+    const authHeader = req.headers.authorization
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
+    if (!token || !(await sessionAuth.verifyPassword(token))) {
+      res.status(401).json({
+        error: {
+          message: 'Invalid API key',
+          type: 'invalid_request_error',
+          code: 'invalid_api_key',
+        },
+      })
+      return
+    }
+    next()
+  }
+
+  const openAiRateLimit = rateLimitMiddleware(60, 60_000)
+  const openAiError = (res: import('express').Response, status: number, message: string, code: string | null = null): void => {
+    res.status(status).json({
+      error: { message, type: 'invalid_request_error', code },
+    })
+  }
+
+  type OpenAIMessage = { role?: unknown; content?: unknown }
+  const messageText = (content: unknown): string | null => {
+    if (typeof content === 'string') return content
+    if (Array.isArray(content)) {
+      const textParts = content
+        .filter((part): part is { type?: unknown; text?: unknown } => !!part && typeof part === 'object')
+        .filter(part => part.type === 'text' && typeof part.text === 'string')
+        .map(part => part.text as string)
+      return textParts.length > 0 ? textParts.join('\n') : null
+    }
+    return null
+  }
+
+  // Model IDs are Bridge Agent IDs. GET /v1/models exposes the valid IDs so
+  // normal OpenAI clients can discover and select registered Agents.
+  app.get('/v1/models', openAiAuth, openAiRateLimit, (_req, res) => {
+    const now = Math.floor(Date.now() / 1000)
+    res.json({
+      object: 'list',
+      data: agentRegistry.listAll().map(agent => ({
+        id: agent.id,
+        object: 'model',
+        created: now,
+        owned_by: 'weclawbot-bridge',
+        root: agent.id,
+        parent: null,
+      })),
+    })
+  })
+
+  app.post('/v1/chat/completions', openAiAuth, openAiRateLimit, async (req, res) => {
+    const body = req.body as { model?: unknown; messages?: unknown; stream?: unknown; user?: unknown }
+    const model = typeof body.model === 'string' ? body.model.trim() : ''
+    if (!model) {
+      openAiError(res, 400, "'model' is required and must be an Agent ID", 'model_required')
+      return
+    }
+
+    const agent = agentRegistry.get(model)
+    if (!agent) {
+      openAiError(res, 404, `The model '${model}' does not exist. Use GET /v1/models to list available Agent IDs.`, 'model_not_found')
+      return
+    }
+
+    if (!Array.isArray(body.messages) || body.messages.length === 0) {
+      openAiError(res, 400, "'messages' must be a non-empty array", 'messages_required')
+      return
+    }
+
+    const messages = body.messages as OpenAIMessage[]
+    const lastMessage = messages[messages.length - 1]
+    if (lastMessage?.role !== 'user') {
+      openAiError(res, 400, "The final message must have role 'user'", 'invalid_messages')
+      return
+    }
+    const finalText = messageText(lastMessage.content)
+    if (finalText == null) {
+      openAiError(res, 400, 'Only text message content is currently supported', 'unsupported_content')
+      return
+    }
+
+    const history: Array<{ role: 'user' | 'assistant'; content: string; timestamp: number }> = []
+    const instructions: string[] = []
+    for (const rawMessage of messages.slice(0, -1)) {
+      const content = messageText(rawMessage.content)
+      if (content == null) {
+        openAiError(res, 400, 'Only text message content is currently supported', 'unsupported_content')
+        return
+      }
+      if (rawMessage.role === 'user' || rawMessage.role === 'assistant') {
+        history.push({ role: rawMessage.role, content, timestamp: Date.now() })
+      } else if (rawMessage.role === 'system' || rawMessage.role === 'developer') {
+        instructions.push(content)
+      } else {
+        openAiError(res, 400, `Unsupported message role '${String(rawMessage.role)}'`, 'invalid_messages')
+        return
+      }
+    }
+
+    // OpenAI's optional user value scopes a caller's own Agent session. Do not
+    // pass it through normalizeUserId(): that helper intentionally collapses
+    // WeChat identities into the Bridge's single-user session.
+    const userId = typeof body.user === 'string' && body.user.trim()
+      ? `openai:${body.user.trim().slice(0, 256)}`
+      : `openai:${crypto.randomUUID()}`
+    const text = instructions.length > 0
+      ? `[System instructions]\n${instructions.join('\n\n')}\n\n[User message]\n${finalText}`
+      : finalText
+    const completionId = `chatcmpl-${crypto.randomUUID().replace(/-/g, '')}`
+    const created = Math.floor(Date.now() / 1000)
+
+    try {
+      const response = await agentRegistry.invoke(agent.id, {
+        message: { text, type: 'text' },
+        session: { userId, agentId: agent.id, history },
+      })
+      const content = response.reply.text
+
+      if (body.stream === true) {
+        res.status(200)
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+        res.setHeader('Cache-Control', 'no-cache, no-transform')
+        res.setHeader('Connection', 'keep-alive')
+        res.write(`data: ${JSON.stringify({
+          id: completionId,
+          object: 'chat.completion.chunk',
+          created,
+          model,
+          choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }],
+        })}\n\n`)
+        res.write(`data: ${JSON.stringify({
+          id: completionId,
+          object: 'chat.completion.chunk',
+          created,
+          model,
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        })}\n\n`)
+        res.end('data: [DONE]\n\n')
+        return
+      }
+
+      res.json({
+        id: completionId,
+        object: 'chat.completion',
+        created,
+        model,
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content },
+          finish_reason: 'stop',
+        }],
+      })
+    } catch (err) {
+      const error = err as Error
+      logger.error({ agentId: agent.id, err: error.message }, 'OpenAI-compatible Agent invocation failed')
+      openAiError(res, 502, 'The selected Agent could not complete the request', 'agent_error')
+    }
+  })
+
   app.get('/', (_req, res) => {
     const status = botManager.getStatus()
     const agents = agentRegistry.listAll()

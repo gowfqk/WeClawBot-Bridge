@@ -175,6 +175,8 @@ docker run -d \
 |------|------|------|
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/metrics` | Prometheus 指标 |
+| GET | `/v1/models` | OpenAI 兼容：列出可调用的 Agent 模型 ID |
+| POST | `/v1/chat/completions` | OpenAI 兼容：以 `model`（Agent ID）调用指定 Agent |
 | POST | `/api/auth/login` | 管理面板登录 |
 | GET | `/api/auth/status` | 检查登录状态 |
 | POST | `/api/auth/setup` | 首次设置密码 |
@@ -196,6 +198,32 @@ docker run -d \
 | PUT | `/api/sessions/config` | 更新会话配置（轮次/过期时间） |
 | POST | `/api/notify` | 发送通知消息 |
 | POST | `/api/webhook` | Webhook 推送（userId 可选） |
+
+### OpenAI 兼容调用
+
+Bridge 提供标准 OpenAI Chat Completions 接口。`model` 不是底层模型名，而是管理面板中配置的 **Agent ID**；因此可用同一个 OpenAI 客户端调用 HTTP、CLI、WS Remote 等不同 Agent。
+
+认证使用 Bridge 的 `API_KEY`（或管理密码），通过 `Authorization: Bearer` 传入；不要使用管理面板登录后得到的临时会话 Token。
+
+```bash
+# 查看可用 Agent ID（可作为 model 使用）
+curl https://your-domain/v1/models \
+  -H "Authorization: Bearer $API_KEY"
+
+# 调用 ID 为 hermes 的 Agent
+curl https://your-domain/v1/chat/completions \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "hermes",
+    "messages": [
+      {"role": "system", "content": "回答简洁。"},
+      {"role": "user", "content": "你好"}
+    ]
+  }'
+```
+
+支持 `stream: true`，返回 OpenAI 格式 SSE。可选的 `user` 字段会作为调用方会话标识；同一 `user` 和 Agent ID 会共享该 Agent 的上下文，未提供时每次请求使用独立会话。
 
 ### Webhook 使用示例
 
