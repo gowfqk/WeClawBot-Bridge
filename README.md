@@ -4,20 +4,11 @@
 
 ## ✨ 功能特性
 
-- **多 Agent 切换**：微信中发 `#命令` 随时切换不同 AI，各自独立维护对话历史，切换不清空上下文
-- **OpenAI 兼容**：HTTP Agent 支持 OpenAI 格式（填 base URL 即可），自动补全 `/chat/completions`，支持流式 SSE 输出
-- **WS Remote Agent（插件接入）**：AI Agent 通过 WebSocket 主动连接 Bridge，无需起 HTTP 服务；Token 自动生成 + 持久化，Bridge 重启不丢失
-- **Vision 支持**：可将微信图片以 base64 `image_url` 方式传给支持视觉的模型
-- **CLI Agent**：将本地命令行工具（如 `claude`、`codex`、`opencode`）直接接入微信，支持持久会话与哨兵结束符
-- **会话管理**：自动维护每用户 × 每 Agent 的对话历史，可配置最大轮次和过期时间；Web 面板支持查看/删除/清空会话，默认永不过期
-- **自动刷新二维码**：微信登录二维码过期后自动重新获取，管理面板实时显示刷新状态
-- **Poller 健康检查**：消息轮询崩溃后 60s 内自动恢复；session 过期 SDK 内部重登，无需手扫
-- **Webhook**：外部程序（GitHub Actions 等）无需 userId，Bot 在线即可推送消息到微信
-- **通知系统**：管理面板一键发送通知，支持文本 / Markdown / 文件 / 带注释文件
-- **详细错误提示**：HTTP 404/401/429/5xx/超时分别返回具体原因，不再笼统报「服务繁忙」
-- **管理面板**：Vue 3 + Naive UI 现代化 SPA，深色主题，响应式布局，移动端友好；内置完整 API 参考文档
-- **安全认证**：管理面板密码登录保护，支持修改密码；API 路由 CSRF 防护
-- **可观测性**：Pino 结构化日志 + Prometheus `/api/metrics` 指标暴露
+- **一个 Bot，多种 Agent**：微信用 `#命令` 切换 HTTP、CLI、WS Remote Agent；每个 Agent 保留独立对话历史。
+- **插件接入**：Hermes、OpenClaw、QwenPaw 通过专用 Channel 接入；Claude Code、OpenCode、Codex CLI 也可通过 WS SDK 接入。Bridge 自动生成 Token 与对应安装指引。
+- **OpenAI 兼容 API**：`POST /v1/chat/completions` 以 `model` = Agent ID 路由到指定 Agent，支持 `GET /v1/models` 与 SSE 响应。
+- **管理与运维**：内置 Agent、会话、Bot 登录、通知和 API 参考面板；支持二维码自动刷新、Webhook、结构化日志与 Prometheus 指标。
+- **安全与可靠性**：密码/API Key 认证、CSRF 防护、可选加密存储、WS 自动重连，以及轮询健康恢复。
 
 ## 🚀 快速开始
 
@@ -65,25 +56,7 @@ PORT=5000 npm run dev
 
 管理面板 → **Agent 管理** → 填写配置后点「添加 Agent」：
 
-**HTTP Agent（OpenAI 格式）示例：**
-
-| 字段 | 值 |
-|------|----|
-| 命令 | `gpt` |
-| 类型 | http |
-| 请求格式 | openai |
-| 端点 URL | `https://api.openai.com/v1` |
-| API Key | `sk-...` |
-| 模型 | `gpt-4o` |
-
-**CLI Agent 示例：**
-
-| 字段 | 值 |
-|------|----|
-| 命令 | `claude` |
-| 类型 | cli |
-| CLI 命令 | `claude` |
-| 模式 | persistent |
+选择类型后填写所需配置：HTTP Agent 支持 OpenAI 兼容端点，CLI Agent 可运行本地命令行工具，WS Remote 用于插件主动连接。
 
 **WS Remote Agent（插件接入）：**
 
@@ -139,19 +112,6 @@ docker run -d \
 ```
 
 访问 `http://localhost:3000` 进入管理面板。
-
-## 🖥️ 管理面板
-
-基于 Vue 3 + Vite + Naive UI 的现代化 SPA，深色主题，响应式布局：
-
-| 页面 | 功能 |
-|------|------|
-| Agent 管理 | 添加/编辑/删除 Agent，在线测试 |
-| Bot 控制 | 查看在线状态、扫码登录、刷新二维码 |
-| 通知管理 | 一键发送通知消息 |
-| 会话管理 | 查看所有会话列表与对话详情，配置过期时间，删除/清空会话 |
-| 设置 | 修改管理密码、深色/浅色主题切换 |
-| API 参考 | 完整接口文档与示例 |
 
 ## 🔧 环境变量
 
