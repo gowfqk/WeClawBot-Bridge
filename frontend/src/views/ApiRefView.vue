@@ -37,7 +37,7 @@
               <tbody>
                 <tr><td><n-text code>#help</n-text></td><td>显示帮助信息</td><td>#help</td></tr>
                 <tr><td><n-text code>#agents</n-text></td><td>列出所有可用 Agent</td><td>#agents</td></tr>
-                <tr><td><n-text code>#status</n-text></td><td>查看 Bot 当前状态</td><td>#status</td></tr>
+                <tr><td><n-text code>#status</n-text></td><td>查看所有 Agent 在线状态</td><td>#status</td></tr>
                 <tr><td><n-text code>#命令</n-text></td><td>切换到指定 Agent</td><td>#hermes</td></tr>
                 <tr><td><n-text code>#clear</n-text></td><td>清空当前会话历史</td><td>#clear</td></tr>
                 <tr><td>直接发消息</td><td>与当前 Agent 对话</td><td>你好</td></tr>
@@ -83,26 +83,23 @@
               </n-tab-pane>
 
               <n-tab-pane name="ws-remote" tab="WS Remote 插件接入">
-                <n-text>AI Agent 通过插件 SDK 主动连接 Bridge，无需起 HTTP 服务：</n-text>
+                <n-text>Hermes、OpenClaw 和 QwenPaw 通过各自的 Channel 插件主动连接 Bridge，无需暴露 Agent 的 HTTP 服务：</n-text>
                 <n-ol style="margin-top: 12px">
                   <n-li>
-                    <n-text strong>添加 Agent</n-text> — 类型选 <n-text code>WS Remote (插件接入)</n-text>，填写命令和名称，点击「生成 Token」。
+                    <n-text strong>添加 Agent</n-text> — 类型选 <n-text code>WS Remote (插件接入)</n-text>，填写 ID、名称和切换命令。
                   </n-li>
                   <n-li>
-                    <n-text strong>安装插件</n-text> — <n-text code>npm install weclawbot-agent-plugin</n-text>
+                    <n-text strong>选择接入方式</n-text> — 在表单或列表的「Token」弹窗中选择 <n-text code>Hermes</n-text>、<n-text code>OpenClaw</n-text> 或 <n-text code>QwenPaw</n-text>。
                   </n-li>
                   <n-li>
-                    <n-text strong>编写 Agent</n-text>：
-                    <n-text depth="3" style="font-size: 13px; display: block; margin-top: 4px">
-                      import { WeClawBotAgent } from 'weclawbot-agent-plugin'<br>
-                      const agent = new WeClawBotAgent({ bridgeUrl, agentId, token })<br>
-                      agent.onMessage(async (msg) =&gt; { return { text: await yourAI(msg.text) } })<br>
-                      agent.connect()
-                    </n-text>
+                    <n-text strong>生成 Token 并安装</n-text> — 点击「生成 Token」，复制当前平台对应的安装命令；命令会自动带入 Bridge 地址、Agent ID 和 Token。
+                  </n-li>
+                  <n-li>
+                    <n-text strong>重启 Agent 服务</n-text> — 连接成功后，Agent 管理列表会显示「在线」。
                   </n-li>
                 </n-ol>
                 <n-text depth="3" style="display: block; margin-top: 8px">
-                  插件自动处理重连、心跳、认证。Agent 离线时消息会提示"不在线"而非丢失。
+                  一个 Bridge 可并行接入多个实例；每个实例必须使用独立的 Agent ID 与 Token。离线时消息会提示「不在线」，插件重连后自动恢复。
                 </n-text>
               </n-tab-pane>
             </n-tabs>
