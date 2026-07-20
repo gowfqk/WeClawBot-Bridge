@@ -44,6 +44,11 @@ export interface WsChatReply {
   type: 'chat'
   id: string
   text: string
+  /**
+   * Whether this completes the originating chat request. Omitted means true
+   * for compatibility with existing Agents that only emit one reply.
+   */
+  final?: boolean
 }
 
 export interface WsPushMessage {
@@ -63,6 +68,14 @@ export type WsServerOutbound = WsChatMessage | WsErrorMessage | { type: 'auth_ok
 
 // ===== 连接信息 =====
 
+interface PendingRequest {
+  resolve: (response: AgentResponse) => void
+  reject: (error: Error) => void
+  timer: ReturnType<typeof setTimeout>
+  /** Delivers non-final replies while keeping the request open. */
+  onIntermediateReply?: (text: string) => void
+}
+
 interface ConnectedAgent {
   ws: WebSocket
   agentId: string
@@ -72,11 +85,7 @@ interface ConnectedAgent {
   model?: string
   connectedAt: number
   lastActivity: number
-  pendingRequests: Map<string, {
-    resolve: (response: AgentResponse) => void
-    reject: (error: Error) => void
-    timer: ReturnType<typeof setTimeout>
-  }>
+  pendingRequests: Map<string, PendingRequest>
 }
 
 // ===== WS Agent Server =====
@@ -235,7 +244,12 @@ export class WsAgentServer {
   }
 
   /** 向 Agent 发送聊天请求（Bridge → Agent） */
-  async invoke(agentId: string, payload: AgentPayload, timeout = 180000): Promise<AgentResponse> {
+  async invoke(
+    agentId: string,
+    payload: AgentPayload,
+    timeout = 180000,
+    onIntermediateReply?: (text: string) => void,
+  ): Promise<AgentResponse> {
     const conn = this.connections.get(agentId)
     if (!conn) {
       return { reply: { text: `WS Agent "${agentId}" 不在线。` } }
@@ -250,7 +264,7 @@ export class WsAgentServer {
         reject(new Error(`WS Agent 响应超时 (${timeout}ms)`))
       }, timeout)
 
-      conn.pendingRequests.set(id, { resolve, reject, timer })
+      conn.pendingRequests.set(id, { resolve, reject, timer, onIntermediateReply })
 
       try {
         this.send(conn.ws, msg)
@@ -396,9 +410,15 @@ export class WsAgentServer {
         const reply = msg as WsChatReply
         const pending = conn.pendingRequests.get(reply.id)
         if (pending) {
-          clearTimeout(pending.timer)
-          conn.pendingRequests.delete(reply.id)
-          pending.resolve({ reply: { text: reply.text || '' } })
+          // Intermediate replies are delivered to WeChat immediately but keep
+          // the request pending; only final (or legacy no-flag) replies resolve it.
+          if (reply.final === false) {
+            pending.onIntermediateReply?.(reply.text || '')
+          } else {
+            clearTimeout(pending.timer)
+            conn.pendingRequests.delete(reply.id)
+            pending.resolve({ reply: { text: reply.text || '' } })
+          }
         } else {
           log.warn({ agentId, id: reply.id }, '收到未知请求 ID 的回复')
         }

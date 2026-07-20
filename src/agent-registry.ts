@@ -97,7 +97,11 @@ export class AgentRegistry {
     return Array.from(this.agents.values())
   }
 
-  async invoke(agentId: string, payload: AgentPayload): Promise<AgentResponse> {
+  async invoke(
+    agentId: string,
+    payload: AgentPayload,
+    onIntermediateReply?: (text: string) => void,
+  ): Promise<AgentResponse> {
     const agent = this.agents.get(agentId)
     if (!agent) {
       const msg = `Agent "${agentId}" 未找到。`
@@ -113,7 +117,7 @@ export class AgentRegistry {
     }
 
     if (agent.type === 'ws-remote') {
-      return this.invokeWsRemote(agentId, payload)
+      return this.invokeWsRemote(agentId, payload, onIntermediateReply)
     }
 
     return this.invokeHttp(agent, payload)
@@ -581,7 +585,11 @@ export class AgentRegistry {
   }
 
   /** WS-Remote 通道：通过 WsAgentServer 路由到远程 Agent */
-  private async invokeWsRemote(agentId: string, payload: AgentPayload): Promise<AgentResponse> {
+  private async invokeWsRemote(
+    agentId: string,
+    payload: AgentPayload,
+    onIntermediateReply?: (text: string) => void,
+  ): Promise<AgentResponse> {
     if (!this.wsAgentServer) {
       const msg = 'WS Agent Server 未初始化。'
       return { reply: { text: msg }, error: { message: msg, status: 503, code: 'agent_unavailable' } }
@@ -594,7 +602,12 @@ export class AgentRegistry {
 
     try {
       const agent = this.agents.get(agentId)
-      return await this.wsAgentServer.invoke(agentId, payload, agent?.timeout ?? 180000)
+      return await this.wsAgentServer.invoke(
+        agentId,
+        payload,
+        agent?.timeout ?? 180000,
+        onIntermediateReply,
+      )
     } catch (err) {
       const error = err as Error
       if (error.message.includes('超时')) {

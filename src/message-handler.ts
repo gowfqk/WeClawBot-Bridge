@@ -114,7 +114,9 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
         },
       }
 
-      const response = await agentRegistry.invoke(currentAgentId, agentPayload)
+      const response = await agentRegistry.invoke(currentAgentId, agentPayload, async (intermediateText) => {
+        if (intermediateText.trim()) await reply(intermediateText)
+      })
 
       // 去重：避免重复追加相同内容
       const lastEntry = session.history[session.history.length - 1]

@@ -14,6 +14,45 @@ describe('WsAgentServer error replies', () => {
     await new Promise<void>((resolve) => httpServer?.close(() => resolve()) ?? resolve())
   })
 
+  it('forwards intermediate replies and resolves only after the final reply', async () => {
+    httpServer = http.createServer()
+    server = new WsAgentServer()
+    server.setAgentToken('agent-1', 'test-token')
+    server.attach(httpServer)
+    await new Promise<void>((resolve) => httpServer!.listen(0, '127.0.0.1', resolve))
+    const address = httpServer.address()
+    if (!address || typeof address === 'string') throw new Error('test server did not listen')
+
+    client = new WebSocket(`ws://127.0.0.1:${address.port}/ws/agent`)
+    await new Promise<void>((resolve, reject) => {
+      client!.once('error', reject)
+      client!.once('open', () => client!.send(JSON.stringify({
+        type: 'auth', agentId: 'agent-1', token: 'test-token',
+      })))
+      client!.on('message', (raw) => {
+        const message = JSON.parse(raw.toString()) as { type: string; id?: string }
+        if (message.type === 'auth_ok') resolve()
+      })
+    })
+
+    client.on('message', (raw) => {
+      const message = JSON.parse(raw.toString()) as { type: string; id?: string }
+      if (message.type === 'chat' && message.id) {
+        client!.send(JSON.stringify({ type: 'chat', id: message.id, text: '正在调用工具…', final: false }))
+        setTimeout(() => {
+          client!.send(JSON.stringify({ type: 'chat', id: message.id, text: '最终回答', final: true }))
+        }, 10)
+      }
+    })
+
+    const intermediate: string[] = []
+    await expect(server.invoke('agent-1', {
+      message: { text: 'hello', type: 'text' },
+      session: { userId: 'default', agentId: 'agent-1', history: [] },
+    }, 1_000, (text) => intermediate.push(text))).resolves.toEqual({ reply: { text: '最终回答' } })
+    expect(intermediate).toEqual(['正在调用工具…'])
+  })
+
   it('rejects a pending request when an agent reports a correlated error', async () => {
     httpServer = http.createServer()
     server = new WsAgentServer()
