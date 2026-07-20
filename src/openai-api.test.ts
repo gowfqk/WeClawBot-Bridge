@@ -18,6 +18,8 @@ const config = {
 
 async function startServer() {
   const calls: Array<{ agentId: string; payload: any }> = []
+  let availabilityError: { status: 503; code: string; message: string } | null = null
+  let responseError: { status: 429 | 502 | 503 | 504; code: string; message: string } | undefined
   const registry = {
     listAll: () => [
       { id: 'hermes', name: 'Hermes', command: 'hermes' },
@@ -26,8 +28,10 @@ async function startServer() {
     get: (id: string) => id === 'hermes'
       ? { id, name: 'Hermes', command: 'hermes', type: 'ws-remote' }
       : undefined,
+    getAvailabilityError: () => availabilityError,
     invoke: async (agentId: string, payload: any) => {
       calls.push({ agentId, payload })
+      if (responseError) return { reply: { text: responseError.message }, error: responseError }
       return { reply: { text: `reply from ${agentId}` } }
     },
   }
@@ -45,7 +49,13 @@ async function startServer() {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('server did not listen')
-  return { server, baseUrl: `http://127.0.0.1:${address.port}`, calls }
+  return {
+    server,
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    calls,
+    setAvailabilityError: (error: typeof availabilityError) => { availabilityError = error },
+    setResponseError: (error: typeof responseError) => { responseError = error },
+  }
 }
 
 describe('OpenAI-compatible API', () => {
@@ -79,7 +89,7 @@ describe('OpenAI-compatible API', () => {
         model: 'hermes',
         user: 'client-a',
         messages: [
-          { role: 'system', content: 'Be concise' },
+          { role: 'assistant', content: 'Previous answer' },
           { role: 'user', content: 'Hello' },
         ],
       }),
@@ -92,8 +102,9 @@ describe('OpenAI-compatible API', () => {
     })
     expect(started.calls).toHaveLength(1)
     expect(started.calls[0].agentId).toBe('hermes')
-    expect(started.calls[0].payload.session.userId).toBe('openai:client-a')
-    expect(started.calls[0].payload.message.text).toContain('[System instructions]')
+    expect(started.calls[0].payload.session.userId).toMatch(/^openai:[A-Za-z0-9_-]{43}$/)
+    expect(started.calls[0].payload.session.userId).not.toContain('client-a')
+    expect(started.calls[0].payload.message.text).toBe('Hello')
   })
 
   it('returns an OpenAI-shaped 404 for an unknown model', async () => {
@@ -106,6 +117,44 @@ describe('OpenAI-compatible API', () => {
     })
     expect(response.status).toBe(404)
     await expect(response.json()).resolves.toMatchObject({ error: { code: 'model_not_found' } })
+  })
+
+  it('rejects malformed messages and unsupported system/developer roles', async () => {
+    const started = await startServer()
+    server = started.server
+    const headers = { Authorization: 'Bearer test-api-key', 'Content-Type': 'application/json' }
+
+    const malformed = await fetch(`${started.baseUrl}/v1/chat/completions`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ model: 'hermes', messages: [null, { role: 'user', content: 'Hello' }] }),
+    })
+    expect(malformed.status).toBe(400)
+    await expect(malformed.json()).resolves.toMatchObject({ error: { code: 'invalid_messages' } })
+
+    const system = await fetch(`${started.baseUrl}/v1/chat/completions`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ model: 'hermes', messages: [{ role: 'system', content: 'Secret rule' }, { role: 'user', content: 'Hello' }] }),
+    })
+    expect(system.status).toBe(400)
+    await expect(system.json()).resolves.toMatchObject({ error: { code: 'unsupported_role' } })
+  })
+
+  it('returns OpenAI errors when the selected Agent is unavailable or fails', async () => {
+    const started = await startServer()
+    server = started.server
+    const headers = { Authorization: 'Bearer test-api-key', 'Content-Type': 'application/json' }
+    const body = JSON.stringify({ model: 'hermes', messages: [{ role: 'user', content: 'Hello' }] })
+
+    started.setAvailabilityError({ status: 503, code: 'agent_unavailable', message: 'Agent "hermes" is offline.' })
+    const unavailable = await fetch(`${started.baseUrl}/v1/chat/completions`, { method: 'POST', headers, body })
+    expect(unavailable.status).toBe(503)
+    await expect(unavailable.json()).resolves.toMatchObject({ error: { type: 'server_error', code: 'agent_unavailable' } })
+
+    started.setAvailabilityError(null)
+    started.setResponseError({ status: 504, code: 'upstream_timeout', message: 'Agent timed out.' })
+    const timeout = await fetch(`${started.baseUrl}/v1/chat/completions`, { method: 'POST', headers, body })
+    expect(timeout.status).toBe(504)
+    await expect(timeout.json()).resolves.toMatchObject({ error: { type: 'server_error', code: 'upstream_timeout' } })
   })
 
   it('emits valid OpenAI SSE framing for stream requests', async () => {

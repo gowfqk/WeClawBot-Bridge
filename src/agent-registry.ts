@@ -28,9 +28,26 @@ export class AgentRegistry {
     this.wsAgentServer = server
   }
 
-  /** 检查 Agent 是否在线 */
+  /** 检查 Agent 是否在线（仅 WS Remote Agent 有此实时状态）。 */
   isOnline(agentId: string): boolean {
     return this.wsAgentServer?.isOnline(agentId) ?? false
+  }
+
+  /** /v1 等程序化入口使用：仅预先拒绝明确不可用的 WS 类型 Agent。 */
+  getAvailabilityError(agentId: string): { status: 503; code: string; message: string } | null {
+    const agent = this.agents.get(agentId)
+    if (!agent) return { status: 503, code: 'agent_unavailable', message: `Agent "${agentId}" is unavailable.` }
+
+    if (agent.type === 'ws-remote' && !this.wsAgentServer?.isOnline(agentId)) {
+      return { status: 503, code: 'agent_unavailable', message: `Agent "${agentId}" is offline.` }
+    }
+    if (agent.type === 'ws') {
+      const channel = this.wsChannels.get(agentId)
+      if (!channel || channel.status !== 'connected') {
+        return { status: 503, code: 'agent_unavailable', message: `Agent "${agentId}" is not connected.` }
+      }
+    }
+    return null
   }
 
   register(config: AgentConfig): void {
@@ -83,7 +100,8 @@ export class AgentRegistry {
   async invoke(agentId: string, payload: AgentPayload): Promise<AgentResponse> {
     const agent = this.agents.get(agentId)
     if (!agent) {
-      return { reply: { text: `Agent "${agentId}" 未找到。` } }
+      const msg = `Agent "${agentId}" 未找到。`
+      return { reply: { text: msg }, error: { message: msg, status: 503, code: 'agent_unavailable' } }
     }
 
     if (agent.type === 'cli') {
@@ -384,7 +402,8 @@ export class AgentRegistry {
         } else {
           msg = `Agent 服务暂时不可用（${s}），请稍后再试。`
         }
-        return { reply: { text: msg } }
+        const status = s === 429 ? 429 : s >= 500 ? 503 : 502
+        return { reply: { text: msg }, error: { message: msg, status, code: s === 429 ? 'upstream_rate_limited' : 'upstream_error' } }
       }
 
       if (agent.streaming && agent.format === 'openai') {
@@ -408,10 +427,12 @@ export class AgentRegistry {
     } catch (err: unknown) {
       const error = err as Error
       if (error.name === 'AbortError') {
-        return { reply: { text: `Agent 响应超时（>${Math.round((agent.timeout || 30000) / 1000)}s），请稍后再试。` } }
+        const msg = `Agent 响应超时（>${Math.round((agent.timeout || 30000) / 1000)}s），请稍后再试。`
+        return { reply: { text: msg }, error: { message: msg, status: 504, code: 'upstream_timeout' } }
       }
       log.error({ agentId: agent.id, err: error.message }, 'Agent unexpected error')
-      return { reply: { text: 'Agent 调用失败，请稍后再试或联系管理员。' } }
+      const msg = 'Agent 调用失败，请稍后再试或联系管理员。'
+      return { reply: { text: msg }, error: { message: msg, status: 502, code: 'upstream_error' } }
     } finally {
       clearTimeout(timeout)
     }
@@ -536,11 +557,13 @@ export class AgentRegistry {
   private async invokeWs(agentId: string, payload: AgentPayload): Promise<AgentResponse> {
     const channel = this.wsChannels.get(agentId)
     if (!channel) {
-      return { reply: { text: 'WS Agent 通道未初始化。' } }
+      const msg = 'WS Agent 通道未初始化。'
+      return { reply: { text: msg }, error: { message: msg, status: 503, code: 'agent_unavailable' } }
     }
 
     if (channel.status !== 'connected') {
-      return { reply: { text: 'Agent 连接中断，正在重连，消息已排队。' } }
+      const msg = 'Agent 连接中断，正在重连，消息已排队。'
+      return { reply: { text: msg }, error: { message: msg, status: 503, code: 'agent_unavailable' } }
     }
 
     try {
@@ -548,21 +571,25 @@ export class AgentRegistry {
     } catch (err) {
       const error = err as Error
       if (error.message.includes('超时')) {
-        return { reply: { text: `Agent 响应超时，请稍后再试。` } }
+        const msg = 'Agent 响应超时，请稍后再试。'
+        return { reply: { text: msg }, error: { message: msg, status: 504, code: 'upstream_timeout' } }
       }
       log.error({ agentId, err: error.message }, 'WS Agent 调用失败')
-      return { reply: { text: 'Agent 调用失败，请稍后再试。' } }
+      const msg = 'Agent 调用失败，请稍后再试。'
+      return { reply: { text: msg }, error: { message: msg, status: 502, code: 'upstream_error' } }
     }
   }
 
   /** WS-Remote 通道：通过 WsAgentServer 路由到远程 Agent */
   private async invokeWsRemote(agentId: string, payload: AgentPayload): Promise<AgentResponse> {
     if (!this.wsAgentServer) {
-      return { reply: { text: 'WS Agent Server 未初始化。' } }
+      const msg = 'WS Agent Server 未初始化。'
+      return { reply: { text: msg }, error: { message: msg, status: 503, code: 'agent_unavailable' } }
     }
 
     if (!this.wsAgentServer.isOnline(agentId)) {
-      return { reply: { text: `Agent "${agentId}" 不在线，请稍后再试。` } }
+      const msg = `Agent "${agentId}" 不在线，请稍后再试。`
+      return { reply: { text: msg }, error: { message: msg, status: 503, code: 'agent_unavailable' } }
     }
 
     try {
@@ -571,10 +598,12 @@ export class AgentRegistry {
     } catch (err) {
       const error = err as Error
       if (error.message.includes('超时')) {
-        return { reply: { text: 'Agent 响应超时，请稍后再试。' } }
+        const msg = 'Agent 响应超时，请稍后再试。'
+        return { reply: { text: msg }, error: { message: msg, status: 504, code: 'upstream_timeout' } }
       }
       log.error({ agentId, err: error.message }, 'WS-Remote Agent 调用失败')
-      return { reply: { text: 'Agent 调用失败，请稍后再试。' } }
+      const msg = 'Agent 调用失败，请稍后再试。'
+      return { reply: { text: msg }, error: { message: msg, status: 502, code: 'upstream_error' } }
     }
   }
 

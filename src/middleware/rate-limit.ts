@@ -4,7 +4,11 @@ interface RateLimitStore {
   [ip: string]: { count: number; resetAt: number }
 }
 
-export function rateLimitMiddleware(maxRequests: number = 60, windowMs: number = 60_000) {
+export function rateLimitMiddleware(
+  maxRequests: number = 60,
+  windowMs: number = 60_000,
+  onLimit?: (req: Request, res: Response, retryAfterSeconds: number) => void,
+) {
   const store: RateLimitStore = {}
   let cleanupTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
     const now = Date.now()
@@ -29,7 +33,9 @@ export function rateLimitMiddleware(maxRequests: number = 60, windowMs: number =
     store[ip].count++
 
     if (store[ip].count > maxRequests) {
-      res.status(429).json({ error: 'Too many requests' })
+      const retryAfterSeconds = Math.max(1, Math.ceil((store[ip].resetAt - now) / 1000))
+      if (onLimit) onLimit(req, res, retryAfterSeconds)
+      else res.status(429).json({ error: 'Too many requests' })
       return
     }
 

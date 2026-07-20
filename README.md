@@ -177,13 +177,14 @@ curl https://your-domain/v1/chat/completions \
   -d '{
     "model": "hermes",
     "messages": [
-      {"role": "system", "content": "回答简洁。"},
       {"role": "user", "content": "你好"}
     ]
   }'
 ```
 
-支持 `stream: true`，返回 OpenAI 格式 SSE。可选的 `user` 字段会作为调用方会话标识；同一 `user` 和 Agent ID 会共享该 Agent 的上下文，未提供时每次请求使用独立会话。
+当前 `/v1` 为**无状态**接口：客户端每次应传入完整 `messages` 历史，Bridge 不保存 OpenAI API 对话历史。仅支持文本 `user` / `assistant` 消息，暂不支持 `system`、`developer`、工具调用或多模态内容。可选 `user` 仅作为传给 Agent 的匿名调用方标识。
+
+支持 `stream: true`，返回 OpenAI SSE 格式的**单块完成响应**（不是逐 token 转发）。Agent 离线、下游限流、超时或调用失败会返回对应的 OpenAI 格式 `503`、`429`、`504` 或 `502` 错误。
 
 ### Webhook 使用示例
 

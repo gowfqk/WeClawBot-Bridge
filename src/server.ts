@@ -160,10 +160,15 @@ export function createServer(
     next()
   }
 
-  const openAiRateLimit = rateLimitMiddleware(60, 60_000)
-  const openAiError = (res: import('express').Response, status: number, message: string, code: string | null = null): void => {
+  const openAiRateLimit = rateLimitMiddleware(60, 60_000, (_req, res, retryAfterSeconds) => {
+    res.setHeader('Retry-After', String(retryAfterSeconds))
+    res.status(429).json({
+      error: { message: 'Rate limit exceeded. Please retry later.', type: 'rate_limit_error', code: 'rate_limit_exceeded' },
+    })
+  })
+  const openAiError = (res: import('express').Response, status: number, message: string, code: string | null = null, type = 'invalid_request_error'): void => {
     res.status(status).json({
-      error: { message, type: 'invalid_request_error', code },
+      error: { message, type, code },
     })
   }
 
@@ -180,9 +185,9 @@ export function createServer(
     return null
   }
 
-  // Model IDs are Bridge Agent IDs. GET /v1/models exposes the valid IDs so
-  // normal OpenAI clients can discover and select registered Agents.
-  app.get('/v1/models', openAiAuth, openAiRateLimit, (_req, res) => {
+  // Model IDs are Bridge Agent IDs. GET /v1/models exposes the registered IDs
+  // so normal OpenAI clients can discover and select configured Agents.
+  app.get('/v1/models', openAiRateLimit, openAiAuth, (_req, res) => {
     const now = Math.floor(Date.now() / 1000)
     res.json({
       object: 'list',
@@ -197,7 +202,12 @@ export function createServer(
     })
   })
 
-  app.post('/v1/chat/completions', openAiAuth, openAiRateLimit, async (req, res) => {
+  app.post('/v1/chat/completions', openAiRateLimit, openAiAuth, async (req, res) => {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      openAiError(res, 400, 'Request body must be a JSON object', 'invalid_request_error')
+      return
+    }
+
     const body = req.body as { model?: unknown; messages?: unknown; stream?: unknown; user?: unknown }
     const model = typeof body.model === 'string' ? body.model.trim() : ''
     if (!model) {
@@ -207,7 +217,12 @@ export function createServer(
 
     const agent = agentRegistry.get(model)
     if (!agent) {
-      openAiError(res, 404, `The model '${model}' does not exist. Use GET /v1/models to list available Agent IDs.`, 'model_not_found')
+      openAiError(res, 404, `The model '${model}' does not exist. Use GET /v1/models to list registered Agent IDs.`, 'model_not_found')
+      return
+    }
+    const availabilityError = agentRegistry.getAvailabilityError(model)
+    if (availabilityError) {
+      openAiError(res, availabilityError.status, availabilityError.message, availabilityError.code, 'server_error')
       return
     }
 
@@ -216,9 +231,13 @@ export function createServer(
       return
     }
 
-    const messages = body.messages as OpenAIMessage[]
+    const messages = body.messages as unknown[]
+    if (!messages.every((message): message is OpenAIMessage => !!message && typeof message === 'object' && !Array.isArray(message))) {
+      openAiError(res, 400, "Each item in 'messages' must be an object", 'invalid_messages')
+      return
+    }
     const lastMessage = messages[messages.length - 1]
-    if (lastMessage?.role !== 'user') {
+    if (lastMessage.role !== 'user') {
       openAiError(res, 400, "The final message must have role 'user'", 'invalid_messages')
       return
     }
@@ -229,7 +248,6 @@ export function createServer(
     }
 
     const history: Array<{ role: 'user' | 'assistant'; content: string; timestamp: number }> = []
-    const instructions: string[] = []
     for (const rawMessage of messages.slice(0, -1)) {
       const content = messageText(rawMessage.content)
       if (content == null) {
@@ -239,30 +257,41 @@ export function createServer(
       if (rawMessage.role === 'user' || rawMessage.role === 'assistant') {
         history.push({ role: rawMessage.role, content, timestamp: Date.now() })
       } else if (rawMessage.role === 'system' || rawMessage.role === 'developer') {
-        instructions.push(content)
+        openAiError(res, 400, `Message role '${rawMessage.role}' is not supported yet`, 'unsupported_role')
+        return
       } else {
         openAiError(res, 400, `Unsupported message role '${String(rawMessage.role)}'`, 'invalid_messages')
         return
       }
     }
 
-    // OpenAI's optional user value scopes a caller's own Agent session. Do not
-    // pass it through normalizeUserId(): that helper intentionally collapses
-    // WeChat identities into the Bridge's single-user session.
-    const userId = typeof body.user === 'string' && body.user.trim()
-      ? `openai:${body.user.trim().slice(0, 256)}`
-      : `openai:${crypto.randomUUID()}`
-    const text = instructions.length > 0
-      ? `[System instructions]\n${instructions.join('\n\n')}\n\n[User message]\n${finalText}`
-      : finalText
+    // /v1 is stateless: clients submit the complete messages array each time.
+    // The optional user value is forwarded as an opaque, collision-resistant
+    // caller identifier for Agents that implement their own session handling.
+    let userId = `openai:${crypto.randomUUID()}`
+    if (body.user !== undefined) {
+      if (typeof body.user !== 'string' || !body.user.trim()) {
+        openAiError(res, 400, "'user' must be a non-empty string when provided", 'invalid_user')
+        return
+      }
+      if (body.user.length > 1024) {
+        openAiError(res, 400, "'user' must be at most 1024 characters", 'invalid_user')
+        return
+      }
+      userId = `openai:${crypto.createHash('sha256').update(body.user).digest('base64url')}`
+    }
     const completionId = `chatcmpl-${crypto.randomUUID().replace(/-/g, '')}`
     const created = Math.floor(Date.now() / 1000)
 
     try {
       const response = await agentRegistry.invoke(agent.id, {
-        message: { text, type: 'text' },
+        message: { text: finalText, type: 'text' },
         session: { userId, agentId: agent.id, history },
       })
+      if (response.error) {
+        openAiError(res, response.error.status, response.error.message, response.error.code, response.error.status === 429 ? 'rate_limit_error' : 'server_error')
+        return
+      }
       const content = response.reply.text
 
       if (body.stream === true) {

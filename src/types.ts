@@ -75,6 +75,12 @@ export interface AgentResponse {
       fileName?: string
     } | null
   }
+  /** 供 HTTP /v1 等程序化调用方识别下游故障；微信仍可显示 reply.text。 */
+  error?: {
+    message: string
+    status: 429 | 502 | 503 | 504
+    code: string
+  }
 }
 
 export interface SendContent {
