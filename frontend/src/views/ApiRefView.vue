@@ -115,7 +115,7 @@
             </n-ul>
             <n-code language="bash" :code="openAiExample" word-break style="display: block; margin-top: 12px" />
             <n-text depth="3" style="display: block; margin-top: 8px">
-              当前为无状态接口：每次请求需传完整 <n-text code>messages</n-text>，Bridge 不保存 OpenAI API 对话历史；仅支持文本 <n-text code>user</n-text> / <n-text code>assistant</n-text> 消息。<n-text code>stream: true</n-text> 返回 SSE 单块完成响应，非逐 token 流。可选 <n-text code>user</n-text> 仅作为传给 Agent 的匿名调用方标识。
+              当前为无状态接口：每次请求需传完整 <n-text code>messages</n-text>，Bridge 不保存 OpenAI API 对话历史；支持文本 <n-text code>user</n-text>、<n-text code>assistant</n-text>、<n-text code>system</n-text>、<n-text code>developer</n-text> 消息，后两者会作为带标签的文本指引转发。<n-text code>stream: true</n-text> 返回 SSE 单块完成响应，非逐 token 流。可选 <n-text code>user</n-text> 仅作为传给 Agent 的匿名调用方标识。
             </n-text>
           </n-card>
 

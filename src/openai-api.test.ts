@@ -119,7 +119,7 @@ describe('OpenAI-compatible API', () => {
     await expect(response.json()).resolves.toMatchObject({ error: { code: 'model_not_found' } })
   })
 
-  it('rejects malformed messages and unsupported system/developer roles', async () => {
+  it('rejects malformed messages and forwards system/developer instructions as text', async () => {
     const started = await startServer()
     server = started.server
     const headers = { Authorization: 'Bearer test-api-key', 'Content-Type': 'application/json' }
@@ -133,10 +133,12 @@ describe('OpenAI-compatible API', () => {
 
     const system = await fetch(`${started.baseUrl}/v1/chat/completions`, {
       method: 'POST', headers,
-      body: JSON.stringify({ model: 'hermes', messages: [{ role: 'system', content: 'Secret rule' }, { role: 'user', content: 'Hello' }] }),
+      body: JSON.stringify({ model: 'hermes', messages: [{ role: 'system', content: 'Answer concisely' }, { role: 'user', content: 'Hello' }] }),
     })
-    expect(system.status).toBe(400)
-    await expect(system.json()).resolves.toMatchObject({ error: { code: 'unsupported_role' } })
+    expect(system.status).toBe(200)
+    expect(started.calls.at(-1).payload.message.text).toContain('[System instructions]')
+    expect(started.calls.at(-1).payload.message.text).toContain('Answer concisely')
+    expect(started.calls.at(-1).payload.message.text).toContain('[User message]')
   })
 
   it('returns OpenAI errors when the selected Agent is unavailable or fails', async () => {

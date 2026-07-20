@@ -182,7 +182,7 @@ curl https://your-domain/v1/chat/completions \
   }'
 ```
 
-当前 `/v1` 为**无状态**接口：客户端每次应传入完整 `messages` 历史，Bridge 不保存 OpenAI API 对话历史。仅支持文本 `user` / `assistant` 消息，暂不支持 `system`、`developer`、工具调用或多模态内容。可选 `user` 仅作为传给 Agent 的匿名调用方标识。
+当前 `/v1` 为**无状态**接口：客户端每次应传入完整 `messages` 历史，Bridge 不保存 OpenAI API 对话历史。支持文本 `user`、`assistant`、`system`、`developer` 消息；后两者会以带标签的文本指引转发给 Agent，非底层模型的原生 system role。工具调用和多模态内容暂不支持。可选 `user` 仅作为传给 Agent 的匿名调用方标识。
 
 支持 `stream: true`，返回 OpenAI SSE 格式的**单块完成响应**（不是逐 token 转发）。Agent 离线、下游限流、超时或调用失败会返回对应的 OpenAI 格式 `503`、`429`、`504` 或 `502` 错误。
 

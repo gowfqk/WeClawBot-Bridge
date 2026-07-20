@@ -160,12 +160,6 @@ export function createServer(
     next()
   }
 
-  const openAiRateLimit = rateLimitMiddleware(60, 60_000, (_req, res, retryAfterSeconds) => {
-    res.setHeader('Retry-After', String(retryAfterSeconds))
-    res.status(429).json({
-      error: { message: 'Rate limit exceeded. Please retry later.', type: 'rate_limit_error', code: 'rate_limit_exceeded' },
-    })
-  })
   const openAiError = (res: import('express').Response, status: number, message: string, code: string | null = null, type = 'invalid_request_error'): void => {
     res.status(status).json({
       error: { message, type, code },
@@ -187,7 +181,7 @@ export function createServer(
 
   // Model IDs are Bridge Agent IDs. GET /v1/models exposes the registered IDs
   // so normal OpenAI clients can discover and select configured Agents.
-  app.get('/v1/models', openAiRateLimit, openAiAuth, (_req, res) => {
+  app.get('/v1/models', openAiAuth, (_req, res) => {
     const now = Math.floor(Date.now() / 1000)
     res.json({
       object: 'list',
@@ -202,7 +196,7 @@ export function createServer(
     })
   })
 
-  app.post('/v1/chat/completions', openAiRateLimit, openAiAuth, async (req, res) => {
+  app.post('/v1/chat/completions', openAiAuth, async (req, res) => {
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
       openAiError(res, 400, 'Request body must be a JSON object', 'invalid_request_error')
       return
@@ -248,6 +242,7 @@ export function createServer(
     }
 
     const history: Array<{ role: 'user' | 'assistant'; content: string; timestamp: number }> = []
+    const instructions: string[] = []
     for (const rawMessage of messages.slice(0, -1)) {
       const content = messageText(rawMessage.content)
       if (content == null) {
@@ -257,8 +252,7 @@ export function createServer(
       if (rawMessage.role === 'user' || rawMessage.role === 'assistant') {
         history.push({ role: rawMessage.role, content, timestamp: Date.now() })
       } else if (rawMessage.role === 'system' || rawMessage.role === 'developer') {
-        openAiError(res, 400, `Message role '${rawMessage.role}' is not supported yet`, 'unsupported_role')
-        return
+        instructions.push(content)
       } else {
         openAiError(res, 400, `Unsupported message role '${String(rawMessage.role)}'`, 'invalid_messages')
         return
@@ -285,7 +279,12 @@ export function createServer(
 
     try {
       const response = await agentRegistry.invoke(agent.id, {
-        message: { text: finalText, type: 'text' },
+        message: {
+          text: instructions.length > 0
+            ? `[System instructions]\n${instructions.join('\n\n')}\n\n[User message]\n${finalText}`
+            : finalText,
+          type: 'text',
+        },
         session: { userId, agentId: agent.id, history },
       })
       if (response.error) {
