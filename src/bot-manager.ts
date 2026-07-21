@@ -90,8 +90,34 @@ export class BotManager {
     // 默认优先恢复 Storage 中已有的微信凭证。仅管理面板明确传入
     // force=true 时才跳过凭证并重新扫码；进程重启时 status 尚未恢复，
     // 不能用它来决定 force，否则会让每次部署都丢失绑定。
-    // loginCallbacks 已在构造函数中设置，SDK 会自动使用它们。
-    this.loginPromise = this.bot.login({ force: force === true })
+    // The SDK swallows constructor-level loginCallbacks; every login() call
+    // must explicitly provide its own callback object.
+    this.loginPromise = this.bot.login({
+      force: force === true,
+      callbacks: {
+        onQrUrl: (url: string) => {
+          this.currentQrUrl = url
+          this.qrCallback?.(url)
+        },
+        onScanned: () => {
+          // QR was scanned — status will transition within the SDK.
+        },
+        onExpired: () => {
+          this.currentQrUrl = undefined
+          if (!this.status.loggedIn) {
+            if (this.qrRefreshTimer) clearTimeout(this.qrRefreshTimer)
+            this.qrRefreshTimer = setTimeout(() => {
+              this.qrRefreshTimer = null
+              if (!this.status.loggedIn) {
+                this.login().catch((err) => {
+                  log.error({ err }, 'QR auto-refresh failed')
+                })
+              }
+            }, 1500)
+          }
+        },
+      },
+    })
     await this.loginPromise
   }
 
