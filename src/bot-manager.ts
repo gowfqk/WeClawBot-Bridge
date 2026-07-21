@@ -19,7 +19,6 @@ export class BotManager {
   private lastActiveUser: string | undefined  // 最近发消息的真实用户
   private loginPromise: Promise<unknown> | null = null
   private qrCallback: ((url: string) => void) | undefined
-  private qrRefreshTimer: ReturnType<typeof setTimeout> | null = null
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null
   private pollerHealthTimer: ReturnType<typeof setInterval> | null = null
   private readonly KEEPALIVE_INTERVAL = 4 * 60 * 60 * 1000 // 4 小时
@@ -30,28 +29,6 @@ export class BotManager {
       storage,
       botAgent: botAgent || 'WeChatAgentGateway/1.0',
       logLevel: 'info',
-      loginCallbacks: {
-        onQrUrl: (url: string) => {
-          this.currentQrUrl = url
-          this.qrCallback?.(url)
-        },
-        onScanned: () => {},
-        onExpired: () => {
-          this.currentQrUrl = undefined
-          // QR 过期后自动刷新
-          if (!this.status.loggedIn) {
-            if (this.qrRefreshTimer) clearTimeout(this.qrRefreshTimer)
-            this.qrRefreshTimer = setTimeout(() => {
-              this.qrRefreshTimer = null
-              if (!this.status.loggedIn) {
-                this.login().catch((err) => {
-                  log.error({ err }, 'QR auto-refresh failed')
-                })
-              }
-            }, 1500)
-          }
-        },
-      },
     })
 
     // SDK 内部已在 setupPollerEvents 中处理 session:expired：
@@ -103,18 +80,11 @@ export class BotManager {
           // QR was scanned — status will transition within the SDK.
         },
         onExpired: () => {
+          // The SDK's outer qrLogin loop already handles up to
+          // MAX_QR_REFRESH_COUNT refreshes; do not initiate another
+          // login() call here or two concurrent polling loops will
+          // exhaust retries and time out.
           this.currentQrUrl = undefined
-          if (!this.status.loggedIn) {
-            if (this.qrRefreshTimer) clearTimeout(this.qrRefreshTimer)
-            this.qrRefreshTimer = setTimeout(() => {
-              this.qrRefreshTimer = null
-              if (!this.status.loggedIn) {
-                this.login().catch((err) => {
-                  log.error({ err }, 'QR auto-refresh failed')
-                })
-              }
-            }, 1500)
-          }
         },
       },
     })
@@ -209,10 +179,6 @@ export class BotManager {
   async stop(): Promise<void> {
     this.stopKeepalive()
     this.stopPollerHealthCheck()
-    if (this.qrRefreshTimer) {
-      clearTimeout(this.qrRefreshTimer)
-      this.qrRefreshTimer = null
-    }
     this.status.polling = false
     this.bot.stop()
   }
