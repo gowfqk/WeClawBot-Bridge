@@ -1,4 +1,5 @@
 import http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import WebSocket from 'ws'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WsAgentServer } from './ws-agent-server'
@@ -85,5 +86,128 @@ describe('WsAgentServer error replies', () => {
       message: { text: 'hello', type: 'text' },
       session: { userId: 'default', agentId: 'agent-1', history: [] },
     }, 1_000)).rejects.toThrow('unsupported media')
+  })
+})
+
+// ===== Bridge → Agent 媒体发送（文件）=====
+
+const TOKEN = 'wsk_test_file_media_token'
+
+function createServer(): Promise<{ server: WsAgentServer; httpServer: http.Server; url: string }> {
+  const wsServer = new WsAgentServer()
+  wsServer.setAgentToken('cs', TOKEN)
+  const httpServer = http.createServer()
+  wsServer.attach(httpServer)
+  return new Promise((resolve) => {
+    httpServer.listen(0, '127.0.0.1', () => {
+      const { port } = httpServer.address() as AddressInfo
+      resolve({ server: wsServer, httpServer, url: `ws://127.0.0.1:${port}/ws/agent` })
+    })
+  })
+}
+
+/** Connect a fake OpenClaw agent and wait for the auth_ok handshake. */
+function connectAgent(url: string, agentId = 'cs'): Promise<{ ws: WebSocket; received: unknown[] }> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url)
+    const received: unknown[] = []
+    const timer = setTimeout(() => reject(new Error('auth_ok timeout')), 5000)
+    ws.on('open', () => {
+      ws.send(JSON.stringify({ type: 'auth', token: TOKEN, agentId, name: 'cs', command: 'cs' }))
+    })
+    ws.on('message', (data) => {
+      const msg = JSON.parse(data.toString())
+      received.push(msg)
+      if (msg.type === 'auth_ok') {
+        clearTimeout(timer)
+        resolve({ ws, received })
+      }
+    })
+    ws.on('error', (err) => {
+      clearTimeout(timer)
+      reject(err)
+    })
+  })
+}
+
+/** The client receives frames asynchronously; poll until the chat frame lands. */
+async function waitForChatFrame(received: unknown[]): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + 5000
+  while (Date.now() < deadline) {
+    const frame = received.find((m) => (m as Record<string, unknown>).type === 'chat')
+    if (frame) return frame as Record<string, unknown>
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  throw new Error('no chat frame received within timeout')
+}
+
+const mediaServers: Array<{ server: WsAgentServer; httpServer: http.Server }> = []
+
+afterEach(async () => {
+  while (mediaServers.length > 0) {
+    const { server, httpServer } = mediaServers.pop()!
+    server.close()
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()))
+  }
+})
+
+describe('WS Agent 发送文件给 Agent', () => {
+  it('把微信文件 base64 编码后通过 WS 帧发给 Agent', async () => {
+    const env = await createServer()
+    mediaServers.push(env)
+    const { ws, received } = await connectAgent(env.url)
+
+    const fileContent = Buffer.from('%PDF-1.4 mock report content')
+    const invokePromise = env.server.invoke('cs', {
+      message: {
+        text: '请看看这个文件',
+        type: 'file',
+        media: { type: 'file', data: fileContent, fileName: 'report.pdf', format: 'pdf' },
+      },
+      session: { userId: 'user', agentId: 'cs', history: [] },
+    })
+
+    // The Bridge → Agent chat frame must carry the file as base64 + metadata.
+    const frame = await waitForChatFrame(received)
+    const payload = frame.payload as { message: Record<string, unknown> }
+    expect(frame.type).toBe('chat')
+    expect(frame.id).toBeTruthy()
+    expect(payload.message.media).toBe(fileContent.toString('base64'))
+    expect(payload.message.mediaType).toBe('file')
+    expect(payload.message.mediaFileName).toBe('report.pdf')
+    expect(payload.message.mediaFormat).toBe('pdf')
+
+    // Fake agent acknowledges, which resolves the invoke() promise.
+    ws.send(JSON.stringify({ type: 'chat', id: frame.id as string, text: '收到文件', final: true }))
+    const response = await invokePromise
+    expect(response.reply.text).toBe('收到文件')
+
+    ws.close()
+  })
+
+  it('无文件名时序列化帧不携带 mediaFileName', async () => {
+    const env = await createServer()
+    mediaServers.push(env)
+    const { ws, received } = await connectAgent(env.url)
+
+    const invokePromise = env.server.invoke('cs', {
+      message: {
+        text: '看看这个',
+        type: 'file',
+        media: { type: 'file', data: Buffer.from('plain binary'), format: 'bin' },
+      },
+      session: { userId: 'user', agentId: 'cs', history: [] },
+    })
+
+    const frame = await waitForChatFrame(received)
+    const payload = frame.payload as { message: Record<string, unknown> }
+    expect(payload.message.media).toBe(Buffer.from('plain binary').toString('base64'))
+    expect(payload.message.mediaType).toBe('file')
+    expect(payload.message.mediaFileName).toBeUndefined()
+    expect(payload.message.mediaFormat).toBe('bin')
+
+    ws.send(JSON.stringify({ type: 'chat', id: frame.id as string, text: 'ok', final: true }))
+    await invokePromise
+    ws.close()
   })
 })
