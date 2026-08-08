@@ -175,6 +175,10 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
         const response = await agentRegistry.invoke(currentAgentId, agentPayload, async (intermediateText) => {
           if (intermediateText.trim()) await reply(intermediateText)
         })
+        log.info(
+          { agentId: currentAgentId, textLen: response.reply.text?.length ?? 0, hasMedia: !!response.reply.media },
+          'Agent 调用完成',
+        )
 
         const assistantEntry: ChatEntry = {
           role: 'assistant',

@@ -271,6 +271,17 @@ export class WsAgentServer {
       id,
       payload: serializeAgentPayload(payload) as unknown as AgentPayload,
     }
+    const serializedMedia = (msg.payload as { message?: { media?: unknown } }).message?.media
+    log.info(
+      {
+        agentId,
+        id,
+        textLen: payload.message?.text?.length ?? 0,
+        mediaBytes: typeof serializedMedia === 'string' ? serializedMedia.length : 0,
+        mediaType: (msg.payload as { message?: { mediaType?: string } }).message?.mediaType,
+      },
+      'WS 发送聊天给 Agent',
+    )
 
     return new Promise<AgentResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -423,6 +434,10 @@ export class WsAgentServer {
         // Agent 回复聊天
         const reply = msg as WsChatReply
         const pending = conn.pendingRequests.get(reply.id)
+        log.info(
+          { agentId, id: reply.id, textLen: reply.text?.length ?? 0, hasMediaField: reply.media != null, mediaType: reply.mediaType, mediaFileName: reply.mediaFileName, final: reply.final },
+          'WS 收到 Agent 聊天回复',
+        )
         if (pending) {
           // Intermediate replies are delivered to WeChat immediately but keep
           // the request pending; only final (or legacy no-flag) replies resolve it.
