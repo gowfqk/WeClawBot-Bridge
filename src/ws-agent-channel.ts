@@ -226,6 +226,9 @@ export class WsAgentChannel {
             ? { data: msg.media, mediaType: msg.mediaType, mediaFileName: msg.mediaFileName, mediaFormat: msg.mediaFormat }
             : msg.media,
         )
+        if (media) {
+          log.info({ agentId: this.agentId, id: msg.id, mediaType: media.type, bytes: media.data.length, fileName: media.fileName }, 'WS 收到 Agent 媒体回复')
+        }
         pending.resolve(media ? { reply: { text, media } } : { reply: { text } })
       } else {
         log.warn({ agentId: this.agentId, id: msg.id }, 'WS 收到未知请求 ID 的响应')

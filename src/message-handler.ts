@@ -7,7 +7,24 @@ import { createLogger } from './logger'
 import { normalizeUserId } from './single-user'
 
 const log = createLogger('message-handler')
-import type { ChatEntry } from './types'
+import type { AgentMedia, ChatEntry } from './types'
+
+/**
+ * Fallback filename when the Agent omits one. The SDK routes `{file, fileName}`
+ * by extension (image/video), so a missing extension silently degrades media to
+ * a generic file — append one based on the declared media type/format.
+ */
+export function fallbackFileName(media: AgentMedia): string {
+  const byType: Record<string, string> = {
+    image: 'image.png',
+    video: 'video.mp4',
+    voice: media.format === 'silk' ? 'voice.silk' : 'voice.wav',
+  }
+  const fallback = byType[media.type?.toLowerCase() ?? ''] || 'file.bin'
+  const fileName = media.fileName?.trim()
+  if (!fileName) return fallback
+  return /\.\w+$/.test(fileName) ? fileName : `${fileName}${fallback.slice(fallback.lastIndexOf('.'))}`
+}
 
 export interface MessageHandlerContext {
   commandHandler: CommandHandler
@@ -114,6 +131,15 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
               await reply('文件下载为空，请重试。')
               return
             }
+            log.info(
+              {
+                type: downloadedMedia.type,
+                bytes: downloadedMedia.data.length,
+                fileName: downloadedMedia.fileName,
+                format: downloadedMedia.format,
+              },
+              '媒体下载成功',
+            )
           } catch {
             await reply('无法处理该文件，请重试。')
             return
@@ -158,13 +184,21 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
         await sessionManager.append(userId, currentAgentId, assistantEntry)
 
         if (response.reply.media) {
-          await botManager.sendReply(raw, {
-            file: {
-              data: response.reply.media.data,
-              fileName: response.reply.media.fileName || 'file',
-            },
-            caption: response.reply.text,
-          })
+          const media = response.reply.media
+          const caption = response.reply.text
+          const mediaType = (media.type || 'file').toLowerCase()
+          log.info({ mediaType, bytes: media.data.length, fileName: media.fileName }, '回发媒体给微信')
+          if (mediaType === 'image') {
+            await botManager.sendReply(raw, { image: media.data, caption })
+          } else if (mediaType === 'video') {
+            await botManager.sendReply(raw, { video: media.data, caption })
+          } else {
+            // file / voice / unknown — send as generic file with a usable extension.
+            await botManager.sendReply(raw, {
+              file: { data: media.data, fileName: fallbackFileName(media) },
+              caption,
+            })
+          }
         } else {
           await reply(response.reply.text)
         }

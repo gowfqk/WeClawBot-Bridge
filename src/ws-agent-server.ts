@@ -149,7 +149,11 @@ export class WsAgentServer {
 
   /** 挂载到 HTTP server 上 */
   attach(httpServer: Server, path = '/ws/agent'): void {
-    this.wss = new WebSocketServer({ server: httpServer, path, maxPayload: 256 * 1024 })
+    // Media files are transmitted base64-encoded inside WS chat messages, so a
+    // small maxPayload (e.g. 256KB) silently kills any Agent reply containing a
+    // file larger than ~190KB. Allow up to 100MB (WeChat's practical file
+    // ceiling) while still bounding memory for misbehaving clients.
+    this.wss = new WebSocketServer({ server: httpServer, path, maxPayload: 100 * 1024 * 1024 })
 
     this.wss.on('connection', (ws, req) => {
       const clientIp = req.socket.remoteAddress
@@ -432,6 +436,9 @@ export class WsAgentServer {
                 ? { data: reply.media, mediaType: reply.mediaType, mediaFileName: reply.mediaFileName, mediaFormat: reply.mediaFormat }
                 : reply.media,
             )
+            if (media) {
+              log.info({ agentId, id: reply.id, mediaType: media.type, bytes: media.data.length, fileName: media.fileName }, 'WS Agent 回复携带媒体')
+            }
             pending.resolve(media
               ? { reply: { text: reply.text || '', media } }
               : { reply: { text: reply.text || '' } })
