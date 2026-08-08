@@ -18,6 +18,20 @@ export interface MessageHandlerContext {
 }
 
 export function createMessageHandler(ctx: MessageHandlerContext) {
+  const sessionQueues = new Map<string, Promise<void>>()
+
+  const enqueueSessionMessage = async (key: string, task: () => Promise<void>): Promise<void> => {
+    const previous = sessionQueues.get(key) ?? Promise.resolve()
+    const current = previous.catch(() => undefined).then(task)
+    sessionQueues.set(key, current)
+
+    try {
+      await current
+    } finally {
+      if (sessionQueues.get(key) === current) sessionQueues.delete(key)
+    }
+  }
+
   return async (msg: {
     userId: string
     text: string
@@ -86,67 +100,66 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
         return
       }
 
-      await botManager.sendTyping(senderId)
+      await enqueueSessionMessage(`${userId}:${currentAgentId}`, async () => {
+        await botManager.sendTyping(senderId)
 
-      const session = await sessionManager.getOrCreate(userId, currentAgentId)
+        const session = await sessionManager.getOrCreate(userId, currentAgentId)
+        const previousHistory = [...session.history]
 
-      let mediaBuffer: Buffer | undefined
-      if (msg.hasMedia) {
-        try {
-          mediaBuffer = await botManager.download(msg)
-        } catch {
-          await reply('无法处理该文件，请重试。')
-          return
+        let mediaBuffer: Buffer | undefined
+        if (msg.hasMedia) {
+          try {
+            mediaBuffer = await botManager.download(msg)
+          } catch {
+            await reply('无法处理该文件，请重试。')
+            return
+          }
         }
-      }
 
-      // 构建 agent payload：history 只传之前的，当前消息由 agent 自己追加
-      const agentPayload = {
-        message: {
-          text,
-          type,
-          media: mediaBuffer || null,
-        },
-        session: {
-          userId,
-          agentId: currentAgentId,
-          history: session.history,
-        },
-      }
-
-      const response = await agentRegistry.invoke(currentAgentId, agentPayload, async (intermediateText) => {
-        if (intermediateText.trim()) await reply(intermediateText)
-      })
-
-      // 去重：避免重复追加相同内容
-      const lastEntry = session.history[session.history.length - 1]
-      if (!lastEntry || lastEntry.content !== text || lastEntry.role !== 'user') {
         const userEntry: ChatEntry = {
           role: 'user',
           content: text,
           timestamp: Date.now(),
         }
         await sessionManager.append(userId, currentAgentId, userEntry)
-      }
 
-      const assistantEntry: ChatEntry = {
-        role: 'assistant',
-        content: response.reply.text,
-        timestamp: Date.now(),
-      }
-      await sessionManager.append(userId, currentAgentId, assistantEntry)
-
-      if (response.reply.media) {
-        await botManager.sendReply(raw, {
-          file: {
-            data: response.reply.media.data,
-            fileName: response.reply.media.fileName || 'file',
+        // history 只传之前的消息，当前消息由 agent 自己追加。
+        const agentPayload = {
+          message: {
+            text,
+            type,
+            media: mediaBuffer || null,
           },
-          caption: response.reply.text,
+          session: {
+            userId,
+            agentId: currentAgentId,
+            history: previousHistory,
+          },
+        }
+
+        const response = await agentRegistry.invoke(currentAgentId, agentPayload, async (intermediateText) => {
+          if (intermediateText.trim()) await reply(intermediateText)
         })
-      } else {
-        await reply(response.reply.text)
-      }
+
+        const assistantEntry: ChatEntry = {
+          role: 'assistant',
+          content: response.reply.text,
+          timestamp: Date.now(),
+        }
+        await sessionManager.append(userId, currentAgentId, assistantEntry)
+
+        if (response.reply.media) {
+          await botManager.sendReply(raw, {
+            file: {
+              data: response.reply.media.data,
+              fileName: response.reply.media.fileName || 'file',
+            },
+            caption: response.reply.text,
+          })
+        } else {
+          await reply(response.reply.text)
+        }
+      })
     } catch (err) {
       const error = err as Error
       log.error({ err: error.message }, 'Message handler error')

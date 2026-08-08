@@ -55,7 +55,12 @@ export class NotificationService {
         lastError = err as Error
         logEntry.status = 'failed'
         logEntry.error = (err as Error).message
-        await this.storage.set(`notify:log:${logId}`, logEntry)
+        // Logging the failure must never itself abort the retry loop.
+        try {
+          await this.storage.set(`notify:log:${logId}`, logEntry)
+        } catch (logErr) {
+          log.warn({ logId, err: (logErr as Error).message }, 'Failed to persist notification log entry')
+        }
 
         // 无 context_token 时重试无意义 — 直接失败
         if (err instanceof NoContextError) {
@@ -92,7 +97,13 @@ export class NotificationService {
       this.startCronJob(rule)
     }
     if (rule.type === 'event' && rule.event) {
-      this.eventHandlers.set(rule.event, async () => this.send(rule.userId, rule.content))
+      this.eventHandlers.set(rule.event, async () => {
+        try {
+          await this.send(rule.userId, rule.content)
+        } catch (err) {
+          log.error({ ruleId: rule.id, event: rule.event, err: (err as Error).message }, 'Event notification failed')
+        }
+      })
     }
     await this.persistRules()
   }
@@ -133,7 +144,11 @@ export class NotificationService {
     }
 
     const job = cron.schedule(rule.schedule, async () => {
-      await this.send(rule.userId, rule.content)
+      try {
+        await this.send(rule.userId, rule.content)
+      } catch (err) {
+        log.error({ ruleId: rule.id, err: (err as Error).message }, 'Scheduled notification failed')
+      }
     })
 
     this.cronJobs.set(rule.id, job)
@@ -168,7 +183,13 @@ export class NotificationService {
       this.rules.set(rule.id, rule)
       if (rule.type === 'cron' && rule.schedule) this.startCronJob(rule)
       if (rule.type === 'event' && rule.event) {
-        this.eventHandlers.set(rule.event, async () => this.send(rule.userId, rule.content))
+        this.eventHandlers.set(rule.event, async () => {
+          try {
+            await this.send(rule.userId, rule.content)
+          } catch (err) {
+            log.error({ ruleId: rule.id, event: rule.event, err: (err as Error).message }, 'Event notification failed')
+          }
+        })
       }
     }
     if (persist) await this.persistRules()

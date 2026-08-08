@@ -18,6 +18,43 @@
         </n-card>
       </n-gi>
 
+      <!-- 发送文件 -->
+      <n-gi>
+        <n-card title="发送文件">
+          <n-space vertical>
+            <n-text depth="3" style="font-size: 13px">
+              上传图片、视频或其他文件直接发送给当前绑定的微信用户（不经过 Agent）。单个文件最大 20MB。
+            </n-text>
+            <input
+              ref="fileInputRef"
+              type="file"
+              style="display: none"
+              @change="handleFileSelected"
+            />
+            <n-space align="center">
+              <n-button @click="triggerFilePicker">
+                选择文件
+              </n-button>
+              <n-text v-if="selectedFile" depth="2" style="font-size: 13px">
+                {{ selectedFile.name }} ({{ formatFileSize(selectedFile.size) }})
+              </n-text>
+            </n-space>
+            <n-input
+              v-model:value="fileCaption"
+              placeholder="附带说明文字（可选）"
+            />
+            <n-button
+              type="primary"
+              :disabled="!selectedFile"
+              :loading="sendingFile"
+              @click="handleSendFile"
+            >
+              发送文件
+            </n-button>
+          </n-space>
+        </n-card>
+      </n-gi>
+
       <!-- 通知规则 -->
       <n-gi>
         <n-card title="通知规则">
@@ -114,6 +151,11 @@ const logs = ref<NotifyLog[]>([])
 const showAddRule = ref(false)
 const addingRule = ref(false)
 
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const selectedFile = ref<File | null>(null)
+const fileCaption = ref('')
+const sendingFile = ref(false)
+
 const ruleForm = ref({
   id: '',
   type: 'cron' as 'cron' | 'event',
@@ -175,6 +217,43 @@ async function handleSend() {
     message.error(e.message)
   } finally {
     sending.value = false
+  }
+}
+
+function triggerFilePicker() {
+  fileInputRef.value?.click()
+}
+
+function handleFileSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  selectedFile.value = input.files?.[0] || null
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+async function handleSendFile() {
+  if (!selectedFile.value) return
+
+  sendingFile.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', selectedFile.value)
+    if (fileCaption.value.trim()) formData.append('caption', fileCaption.value.trim())
+
+    await api.uploadFile('/api/notify/send-file', formData)
+    message.success('文件已发送')
+    selectedFile.value = null
+    fileCaption.value = ''
+    if (fileInputRef.value) fileInputRef.value.value = ''
+    loadLogs()
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    sendingFile.value = false
   }
 }
 

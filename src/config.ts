@@ -21,19 +21,23 @@ export interface AppConfig {
   sessionExpireMs: number
 }
 
+/** Parse an integer env var, returning undefined for empty/invalid values
+ *  instead of silently keeping NaN (which would compare as "unlimited"). */
+function parseIntEnv(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const n = parseInt(value, 10)
+  return Number.isFinite(n) ? n : undefined
+}
+
 function loadFromEnv(): Partial<AppConfig> {
   return {
-    port: process.env.PORT ? parseInt(process.env.PORT, 10) : undefined,
+    port: parseIntEnv(process.env.PORT),
     storageDir: process.env.STORAGE_DIR,
     encryptionKey: process.env.ENCRYPTION_KEY,
     apiKey: process.env.API_KEY,
     logLevel: process.env.LOG_LEVEL,
-    sessionMaxRounds: process.env.SESSION_MAX_ROUNDS
-      ? parseInt(process.env.SESSION_MAX_ROUNDS, 10)
-      : undefined,
-    sessionExpireMs: process.env.SESSION_EXPIRE_MS
-      ? parseInt(process.env.SESSION_EXPIRE_MS, 10)
-      : undefined,
+    sessionMaxRounds: parseIntEnv(process.env.SESSION_MAX_ROUNDS),
+    sessionExpireMs: parseIntEnv(process.env.SESSION_EXPIRE_MS),
   }
 }
 
@@ -69,9 +73,20 @@ export function loadConfig(configPath?: string): AppConfig {
       const parsed = AgentsFileSchema.parse(raw)
       agents = parsed.agents
       defaultAgentId = parsed.defaultAgentId
-    } catch {
-      // agents.json 损坏时忽略，使用空列表
+    } catch (err) {
+      // agents.json 损坏或格式错误：使用空列表，但记录日志便于排查
+      // eslint-disable-next-line no-console
+      console.warn(`[config] Failed to parse ${agentsPath}: ${(err as Error).message}. Falling back to an empty agent list.`)
     }
+  }
+
+  if (env.encryptionKey && !/^[0-9a-fA-F]{64}$/.test(env.encryptionKey)) {
+    throw new Error('ENCRYPTION_KEY must be a 64-character hex string (32 bytes). Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"')
+  }
+
+  if (env.apiKey && env.apiKey.length < 8) {
+    // eslint-disable-next-line no-console
+    console.warn('[config] API_KEY is shorter than 8 characters. This weakens login/API brute-force resistance; consider using a longer value.')
   }
 
   cachedConfig = {

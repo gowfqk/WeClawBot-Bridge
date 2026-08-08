@@ -2,6 +2,16 @@ import { WeChatBot, type Storage } from '@wechatbot/wechatbot'
 import type { BotStatus, SendContent as GatewaySendContent } from './types'
 import { createLogger } from './logger'
 
+// Mirrors @wechatbot/wechatbot's STORAGE_KEYS (dist/storage/interface.js).
+// Not imported directly: the project's tsconfig "moduleResolution": "node"
+// cannot resolve the SDK's "./storage" package.json subpath export.
+const SDK_STORAGE_KEYS = {
+  CREDENTIALS: 'credentials',
+  CURSOR: 'cursor',
+  CONTEXT_TOKENS: 'context_tokens',
+  TYPING_TICKETS: 'typing_tickets',
+} as const
+
 const log = createLogger('bot-manager')
 
 export type MessageHandler = (msg: {
@@ -64,6 +74,21 @@ export class BotManager {
   async login(onQrUrl?: (url: string) => void, force?: boolean): Promise<void> {
     if (onQrUrl) this.qrCallback = onQrUrl
 
+    if (force) {
+      // The SDK's qrLogin() reads the OLD stored credential's token and sends
+      // it to the server as a "known local token" when requesting a fresh QR
+      // code (even though we pass force:true to skip the credential-reuse
+      // shortcut). If a prior binding's token is still present, the server
+      // recognizes it and responds with `binded_redirect`, causing the SDK to
+      // silently return the OLD credentials instead of completing the new
+      // scan — this is exactly why "重新绑定" appeared to do nothing after the
+      // first successful bind. Mirror what the SDK's own session:expired
+      // handler does: clear stored credentials before requesting a new QR.
+      await this.clearStoredCredentials()
+      this.status = { loggedIn: false, polling: false }
+      this.currentQrUrl = undefined
+    }
+
     // 默认优先恢复 Storage 中已有的微信凭证。仅管理面板明确传入
     // force=true 时才跳过凭证并重新扫码；进程重启时 status 尚未恢复，
     // 不能用它来决定 force，否则会让每次部署都丢失绑定。
@@ -89,6 +114,35 @@ export class BotManager {
       },
     })
     await this.loginPromise
+  }
+
+  /** 清空 SDK 存储中的凭据、游标、上下文令牌和打字票据。不会影响 Bridge 自己的
+   *  会话历史、Agent 配置等数据，这些都是独立存储的。 */
+  private async clearStoredCredentials(): Promise<void> {
+    await Promise.all([
+      this.bot.storage.delete(SDK_STORAGE_KEYS.CREDENTIALS),
+      this.bot.storage.delete(SDK_STORAGE_KEYS.CURSOR),
+      this.bot.storage.delete(SDK_STORAGE_KEYS.CONTEXT_TOKENS),
+      this.bot.storage.delete(SDK_STORAGE_KEYS.TYPING_TICKETS),
+    ])
+  }
+
+  /** 主动解绑：停止轮询、清空凭据，不自动重新扫码。
+   *  与 login(force=true) 的区别：这里不会紧接着发起新的登录流程，
+   *  适合用户只想解除绑定、暂时不绑新账号的场景。 */
+  async unbind(): Promise<void> {
+    log.info('Unbinding WeChat account, clearing stored credentials')
+    this.stopKeepalive()
+    this.stopPollerHealthCheck()
+    try {
+      this.bot.stop()
+    } catch (err) {
+      log.warn({ err: (err as Error).message }, 'Error stopping poller during unbind')
+    }
+    await this.clearStoredCredentials()
+    this.status = { loggedIn: false, polling: false }
+    this.currentQrUrl = undefined
+    this.lastActiveUser = undefined
   }
 
   async loginAndStart(

@@ -31,6 +31,15 @@
           <n-space vertical align="center">
             <template v-if="botStatus.loggedIn">
               <n-result status="success" title="已登录" :description="`账号: ${botStatus.accountId || botStatus.currentUser}`" />
+              <n-button
+                type="error"
+                ghost
+                :loading="unbindLoading"
+                @click="handleUnbind"
+                style="margin-top: 12px"
+              >
+                解除绑定
+              </n-button>
             </template>
             <template v-else-if="botStatus.qrUrl">
               <div class="qr-container">
@@ -65,7 +74,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useMessage } from 'naive-ui'
+import { useMessage, useDialog } from 'naive-ui'
 import QrcodeVue from 'qrcode.vue'
 import { api } from '../composables/api'
 
@@ -78,8 +87,10 @@ interface BotStatusInfo {
 }
 
 const message = useMessage()
+const dialog = useDialog()
 const botStatus = ref<BotStatusInfo>({ loggedIn: false, polling: false })
 const loginLoading = ref(false)
+const unbindLoading = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 async function loadStatus() {
@@ -106,6 +117,27 @@ async function handleLogin() {
   } finally {
     loginLoading.value = false
   }
+}
+
+function handleUnbind() {
+  dialog.warning({
+    title: '确认解除绑定',
+    content: '解绑后当前微信账号将断开连接，需重新扫码才能继续使用。确认继续？',
+    positiveText: '解除绑定',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      unbindLoading.value = true
+      try {
+        await api.post('/api/bot/unbind')
+        botStatus.value = { loggedIn: false, polling: false }
+        message.success('已解除绑定，可重新扫码绑定新账号')
+      } catch (e: any) {
+        message.error(e.message)
+      } finally {
+        unbindLoading.value = false
+      }
+    },
+  })
 }
 
 onMounted(() => {

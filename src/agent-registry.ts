@@ -571,7 +571,8 @@ export class AgentRegistry {
     }
 
     try {
-      return await channel.invoke(payload)
+      const agent = this.agents.get(agentId)
+      return await channel.invoke(payload, agent?.timeout ?? 60000)
     } catch (err) {
       const error = err as Error
       if (error.message.includes('超时')) {

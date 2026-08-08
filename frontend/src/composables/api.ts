@@ -121,4 +121,25 @@ export const api = {
     }
     return res.json()
   },
+
+  /** 上传二进制文件（multipart/form-data）。不要手动设置 Content-Type，
+   *  浏览器会自动带上正确的 multipart boundary。 */
+  uploadFile: async (url: string, formData: FormData) => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { ...authHeaders() },
+      body: formData,
+      credentials: 'include',
+    })
+    if (res.status === 401 || res.status === 403) {
+      const err = await res.json().catch(() => ({}))
+      handleAuthError(res.status, err)
+      throw new Error(err.error || '认证失败')
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.error || `上传失败 (${res.status})`)
+    }
+    return res.json()
+  },
 }

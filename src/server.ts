@@ -27,6 +27,7 @@ import {
 import cors from 'cors'
 import helmet from 'helmet'
 import cookieParser from 'cookie-parser'
+import multer from 'multer'
 
 export function createServer(
   config: AppConfig,
@@ -179,9 +180,14 @@ export function createServer(
     return null
   }
 
+  // Bearer credential here is the same management password/API_KEY used for
+  // login; without a rate limit it could be brute-forced independently of
+  // /api/auth/login's limiter.
+  const openAiRateLimit = rateLimitMiddleware(30, 15 * 60 * 1000)
+
   // Model IDs are Bridge Agent IDs. GET /v1/models exposes the registered IDs
   // so normal OpenAI clients can discover and select configured Agents.
-  app.get('/v1/models', openAiAuth, (_req, res) => {
+  app.get('/v1/models', openAiRateLimit, openAiAuth, (_req, res) => {
     const now = Math.floor(Date.now() / 1000)
     res.json({
       object: 'list',
@@ -196,7 +202,7 @@ export function createServer(
     })
   })
 
-  app.post('/v1/chat/completions', openAiAuth, async (req, res) => {
+  app.post('/v1/chat/completions', openAiRateLimit, openAiAuth, async (req, res) => {
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
       openAiError(res, 400, 'Request body must be a JSON object', 'invalid_request_error')
       return
@@ -375,9 +381,11 @@ export function createServer(
   const COOKIE_NAME = 'wcbot_session'
   const setAuthCookie = (res: import('express').Response, token: string, expiresAt: number): void => {
     const maxAge = Math.max(0, expiresAt - Date.now())
-    // Tunnel/反向代理场景：原始请求可能是 HTTPS，但 Node 侧是 HTTP
-    // 通过 X-Forwarded-Proto 判断真实协议
-    const isSecure = res.req?.secure || res.req?.headers['x-forwarded-proto'] === 'https' || process.env.NODE_ENV === 'production'
+    // req.secure is true for direct HTTPS and, only when Express trust proxy is
+    // explicitly enabled, for a trusted X-Forwarded-Proto=https request. Do not
+    // infer HTTPS from NODE_ENV: production deployments may intentionally use
+    // plain HTTP on a trusted LAN, where a Secure cookie would never be returned.
+    const isSecure = !!res.req?.secure
     res.cookie(COOKIE_NAME, token, {
       httpOnly: true,
       secure: isSecure,
@@ -388,7 +396,7 @@ export function createServer(
   }
 
   const clearAuthCookie = (res: import('express').Response): void => {
-    const isSecure = res.req?.secure || res.req?.headers['x-forwarded-proto'] === 'https' || process.env.NODE_ENV === 'production'
+    const isSecure = !!res.req?.secure
     res.clearCookie(COOKIE_NAME, { path: '/', secure: isSecure, sameSite: isSecure ? 'none' : 'lax' })
   }
 
@@ -497,20 +505,16 @@ export function createServer(
     res.json({ ok: true })
   })
 
+  // Unauthenticated: used by Docker HEALTHCHECK / uptime probes. Must not
+  // leak account identity or login QR codes to unauthenticated callers.
   app.get('/api/health', (_req, res) => {
-    const wsAgents = wsAgentServer ? wsAgentServer.getOnlineAgents().map(a => ({
-      id: a.agentId,
-      online: true,
-      lastActivity: a.lastActivity,
-    })) : []
     res.json({
       status: 'ok',
-      bot: botManager.getStatus(),
-      wsAgents,
+      loggedIn: botManager.getStatus().loggedIn,
     })
   })
 
-  app.get('/api/metrics', async (_req, res) => {
+  app.get('/api/metrics', dynamicAuth, async (_req, res) => {
     res.set('Content-Type', 'text/plain')
     res.send(await getMetrics())
   })
@@ -533,6 +537,16 @@ export function createServer(
     }
   })
 
+  app.post('/api/bot/unbind', dynamicAuth, async (_req, res) => {
+    try {
+      await botManager.unbind()
+      res.json({ ok: true, status: botManager.getStatus() })
+    } catch (err) {
+      logger.error({ err: (err as Error).message }, 'Bot unbind error')
+      res.status(500).json({ error: '解绑失败，请重试。' })
+    }
+  })
+
   app.get('/api/bot/status', dynamicAuth, (_req, res) => {
     res.json(botManager.getStatus())
   })
@@ -547,6 +561,8 @@ export function createServer(
       const { apiKey } = req.body
       if (apiKey !== undefined) {
         if (apiKey) {
+          const v = validate(SetupSchema, { password: apiKey })
+          if (!v.ok) { res.status(400).json({ error: v.error }); return }
           await sessionAuth.setPassword(apiKey)
         } else {
           // 清空密码：同时删除旧明文 key 和新哈希 key
@@ -636,7 +652,7 @@ export function createServer(
       // v2 新增：导入全部存储数据（会话、通知日志、上下文令牌等）
       // 安全限制：禁止覆盖旧版明文密钥和微信上下文令牌
       const BLOCKED_IMPORT_KEYS = new Set([
-        'config:api_key', 'config:default_recipient',
+        'config:api_key', 'config:api_key_hash', 'config:default_recipient',
       ])
       const isBlockedKey = (key: string) =>
         BLOCKED_IMPORT_KEYS.has(key) || key.startsWith('context_token:')
@@ -769,8 +785,12 @@ export function createServer(
       res.status(404).json({ error: 'Agent not found' })
       return
     }
-    const { text } = req.body
-    if (!text) {
+    if (!req.body || typeof req.body !== 'object') {
+      res.status(400).json({ error: 'Invalid request body' })
+      return
+    }
+    const { text } = req.body as { text?: unknown }
+    if (!text || typeof text !== 'string') {
       res.status(400).json({ error: 'text is required' })
       return
     }
@@ -841,6 +861,36 @@ export function createServer(
       res.json({ ok: true })
     } catch (err) {
       const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
+  })
+
+  // 手动发送附件：仅管理员面板一次性推送，不持久化。使用内存存储避免磁盘残留，
+  // 并限制单个文件大小以避免占用过多内存。
+  const notifyFileUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 20 * 1024 * 1024 },
+  })
+
+  app.post('/api/notify/send-file', dynamicAuth, notifyFileUpload.single('file'), async (req, res) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: '请选择要发送的文件' })
+        return
+      }
+      const userId = typeof req.body?.userId === 'string' && req.body.userId.trim() ? req.body.userId.trim() : undefined
+      const caption = typeof req.body?.caption === 'string' && req.body.caption.trim() ? req.body.caption.trim() : undefined
+      const fileName = req.file.originalname || 'file'
+
+      // SDK 会根据 fileName 后缀自动路由为图片/视频/普通文件，无需 Bridge 自己判断类型。
+      await notificationService.send(userId, {
+        file: { data: req.file.buffer, fileName },
+        caption,
+      })
+      res.json({ ok: true })
+    } catch (err) {
+      const error = err as Error
+      logger.error({ err: error.message }, 'File notification send error')
       res.status(500).json({ error: error.message })
     }
   })
@@ -990,6 +1040,24 @@ export function createServer(
       return
     }
     res.sendFile(path.resolve(__dirname, '../public/index.html'))
+  })
+
+  // Global error handler: must be last. Catches body-parser JSON errors and
+  // any synchronous throw inside route handlers that would otherwise reach
+  // Express's default handler and leak stack traces / file paths.
+  app.use((err: unknown, req: import('express').Request, res: import('express').Response, _next: import('express').NextFunction) => {
+    if (err instanceof multer.MulterError) {
+      const message = err.code === 'LIMIT_FILE_SIZE'
+        ? '文件过大，请上传更小的文件（上限 20MB）。'
+        : '文件上传失败，请重试。'
+      logger.warn({ err: err.message, code: err.code, path: req.path }, 'File upload rejected')
+      if (!res.headersSent) res.status(400).json({ error: message })
+      return
+    }
+    const error = err as Error
+    logger.error({ err: error.message, path: req.path }, 'Unhandled request error')
+    if (res.headersSent) return
+    res.status(500).json({ error: 'Internal server error' })
   })
 
   return app
