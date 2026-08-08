@@ -19,6 +19,7 @@ import type { Server } from 'node:http'
 import type { AgentPayload, AgentResponse } from './types'
 import type { Storage } from './types'
 import { createLogger } from './logger'
+import { decodeAgentMedia, serializeAgentPayload } from './media'
 
 const log = createLogger('ws-agent-server')
 
@@ -49,6 +50,11 @@ export interface WsChatReply {
    * for compatibility with existing Agents that only emit one reply.
    */
   final?: boolean
+  /** Base64 media returned by the Agent. */
+  media?: unknown
+  mediaType?: string
+  mediaFileName?: string
+  mediaFormat?: string
 }
 
 export interface WsPushMessage {
@@ -256,7 +262,11 @@ export class WsAgentServer {
     }
 
     const id = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
-    const msg: WsChatMessage = { type: 'chat', id, payload }
+    const msg: WsChatMessage = {
+      type: 'chat',
+      id,
+      payload: serializeAgentPayload(payload) as unknown as AgentPayload,
+    }
 
     return new Promise<AgentResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -417,7 +427,14 @@ export class WsAgentServer {
           } else {
             clearTimeout(pending.timer)
             conn.pendingRequests.delete(reply.id)
-            pending.resolve({ reply: { text: reply.text || '' } })
+            const media = decodeAgentMedia(
+              typeof reply.media === 'string'
+                ? { data: reply.media, mediaType: reply.mediaType, mediaFileName: reply.mediaFileName, mediaFormat: reply.mediaFormat }
+                : reply.media,
+            )
+            pending.resolve(media
+              ? { reply: { text: reply.text || '', media } }
+              : { reply: { text: reply.text || '' } })
           }
         } else {
           log.warn({ agentId, id: reply.id }, '收到未知请求 ID 的回复')

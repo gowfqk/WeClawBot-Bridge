@@ -106,10 +106,14 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
         const session = await sessionManager.getOrCreate(userId, currentAgentId)
         const previousHistory = [...session.history]
 
-        let mediaBuffer: Buffer | undefined
+        let downloadedMedia: Awaited<ReturnType<BotManager['download']>> = null
         if (msg.hasMedia) {
           try {
-            mediaBuffer = await botManager.download(msg)
+            downloadedMedia = await botManager.download(msg)
+            if (!downloadedMedia?.data?.length) {
+              await reply('文件下载为空，请重试。')
+              return
+            }
           } catch {
             await reply('无法处理该文件，请重试。')
             return
@@ -127,8 +131,13 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
         const agentPayload = {
           message: {
             text,
-            type,
-            media: mediaBuffer || null,
+            type: downloadedMedia?.type || type,
+            media: downloadedMedia ? {
+              type: downloadedMedia.type,
+              data: downloadedMedia.data,
+              fileName: downloadedMedia.fileName,
+              format: downloadedMedia.format,
+            } : null,
           },
           session: {
             userId,

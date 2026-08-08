@@ -50,11 +50,19 @@ export interface Session {
   lastActive: number
 }
 
+export interface AgentMedia {
+  type: string
+  data: Buffer
+  fileName?: string
+  format?: string
+}
+
 export interface AgentPayload {
   message: {
     text: string
     type: string
-    media?: Buffer | null
+    /** Internal Buffer or structured media; transports serialize it as base64. */
+    media?: Buffer | AgentMedia | null
   }
   session: {
     userId: string
@@ -73,6 +81,7 @@ export interface AgentResponse {
       type: string
       data: Buffer
       fileName?: string
+      format?: string
     } | null
   }
   /** 供 HTTP /v1 等程序化调用方识别下游故障；微信仍可显示 reply.text。 */

@@ -3,6 +3,7 @@ import { CliAgentAdapter } from './cli-agent'
 import { WsAgentChannel, type WsChannelStatus } from './ws-agent-channel'
 import type { WsAgentServer } from './ws-agent-server'
 import { createLogger } from './logger'
+import { extractResponseMedia, normalizeMedia } from './media'
 
 const log = createLogger('agent-registry')
 
@@ -133,12 +134,13 @@ export class AgentRegistry {
       messages.push({ role: entry.role, content: entry.content })
     }
 
-    const { text, media, type } = payload.message
+    const { text, type } = payload.message
+    const media = normalizeMedia(payload.message.media, type)
     const isImage = type === 'image' || type?.startsWith('image')
 
     if (media && isImage) {
-      const mime = type === 'image' ? 'image/jpeg' : `image/${type.replace('image/', '')}`
-      const b64 = media.toString('base64')
+      const mime = media.fileName?.match(/\.[a-z0-9]+$/i)?.[0]?.slice(1) || (type === 'image' ? 'jpeg' : type.replace('image/', ''))
+      const b64 = media.data.toString('base64')
       const parts: OpenAIContentPart[] = [
         { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}`, detail: 'auto' } },
       ]
@@ -170,7 +172,15 @@ export class AgentRegistry {
       message: {
         text: payload.message.text,
         type: payload.message.type,
-        media: payload.message.media ? payload.message.media.toString('base64') : null,
+        media: (() => {
+          const media = normalizeMedia(payload.message.media, payload.message.type)
+          return media ? media.data.toString('base64') : null
+        })(),
+        ...(normalizeMedia(payload.message.media, payload.message.type) ? {
+          mediaType: normalizeMedia(payload.message.media, payload.message.type)!.type,
+          mediaFileName: normalizeMedia(payload.message.media, payload.message.type)!.fileName,
+          mediaFormat: normalizeMedia(payload.message.media, payload.message.type)!.format,
+        } : {}),
       },
       session: {
         userId: payload.session.userId,
@@ -196,11 +206,12 @@ export class AgentRegistry {
     }
 
     // Current message
-    const { text, media, type } = payload.message
+    const { text, type } = payload.message
+    const media = normalizeMedia(payload.message.media, type)
     const isImage = type === 'image' || type?.startsWith('image')
     if (media && isImage) {
-      const mime = type === 'image' ? 'jpeg' : type.replace('image/', '')
-      const b64 = media.toString('base64')
+      const mime = media.fileName?.match(/\.[a-z0-9]+$/i)?.[0]?.slice(1) || (type === 'image' ? 'jpeg' : type.replace('image/', ''))
+      const b64 = media.data.toString('base64')
       const contentBlocks: Array<Record<string, unknown>> = [
         { type: 'image', image: `data:image/${mime};base64,${b64}` },
       ]
@@ -426,8 +437,11 @@ export class AgentRegistry {
       const text = agent.responsePath
         ? this.extractByPath(data, agent.responsePath)
         : this.extractResponseText(data)
+      const media = extractResponseMedia(data)
 
-      return text ? { reply: { text } } : { reply: { text: this.defaultFallbackText } }
+      return text || media
+        ? { reply: { text: text || '', media } }
+        : { reply: { text: this.defaultFallbackText } }
     } catch (err: unknown) {
       const error = err as Error
       if (error.name === 'AbortError') {
@@ -506,6 +520,7 @@ export class AgentRegistry {
   }
 
   private extractResponseText(data: Record<string, unknown>): string | null {
+    if (typeof data.reply === 'string') return data.reply
     if (data.reply && typeof (data.reply as Record<string, unknown>).text === 'string') {
       return (data.reply as Record<string, unknown>).text as string
     }

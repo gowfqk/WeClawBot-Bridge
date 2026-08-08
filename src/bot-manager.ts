@@ -1,4 +1,4 @@
-import { WeChatBot, type Storage } from '@wechatbot/wechatbot'
+import { WeChatBot, type Storage, type DownloadedMedia } from '@wechatbot/wechatbot'
 import type { BotStatus, SendContent as GatewaySendContent } from './types'
 import { createLogger } from './logger'
 
@@ -290,10 +290,9 @@ export class BotManager {
     }
   }
 
-  async download(msg: { raw: unknown }): Promise<Buffer | undefined> {
+  async download(msg: { raw: unknown }): Promise<DownloadedMedia | null> {
     const incomingMsg = msg.raw as Parameters<WeChatBot['download']>[0]
-    const media = await this.bot.download(incomingMsg)
-    return media?.data
+    return this.bot.download(incomingMsg)
   }
 
   async sendTyping(userId: string): Promise<void> {

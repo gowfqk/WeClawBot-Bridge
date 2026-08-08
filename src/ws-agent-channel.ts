@@ -13,6 +13,7 @@
 import WebSocket from 'ws'
 import type { AgentConfig, AgentPayload, AgentResponse } from './types'
 import { createLogger } from './logger'
+import { decodeAgentMedia, serializeAgentPayload } from './media'
 
 const log = createLogger('ws-agent')
 
@@ -29,6 +30,10 @@ interface WsResponse {
   id: string              // 对应请求 ID
   text?: string           // chat 响应文本
   error?: string          // 错误信息
+  media?: unknown         // base64 media returned by the Agent
+  mediaType?: string
+  mediaFileName?: string
+  mediaFormat?: string
 }
 
 /** 待处理的请求（等待响应的 Promise） */
@@ -148,7 +153,11 @@ export class WsAgentChannel {
     }
 
     const id = `${this.agentId}-${++this.requestCounter}-${Date.now()}`
-    const request: WsRequest = { type: 'chat', id, payload }
+    const request: WsRequest = {
+      type: 'chat',
+      id,
+      payload: serializeAgentPayload(payload) as unknown as AgentPayload,
+    }
 
     return new Promise<AgentResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -212,7 +221,12 @@ export class WsAgentChannel {
         clearTimeout(pending.timer)
         this.pending.delete(msg.id)
         const text = msg.text || ''
-        pending.resolve({ reply: { text } })
+        const media = decodeAgentMedia(
+          typeof msg.media === 'string'
+            ? { data: msg.media, mediaType: msg.mediaType, mediaFileName: msg.mediaFileName, mediaFormat: msg.mediaFormat }
+            : msg.media,
+        )
+        pending.resolve(media ? { reply: { text, media } } : { reply: { text } })
       } else {
         log.warn({ agentId: this.agentId, id: msg.id }, 'WS 收到未知请求 ID 的响应')
       }
