@@ -124,7 +124,7 @@ export const api = {
 
   /** 上传二进制文件（multipart/form-data）。不要手动设置 Content-Type，
    *  浏览器会自动带上正确的 multipart boundary。 */
-  uploadFile: async (url: string, formData: FormData) => {
+  uploadFile: async <T = any>(url: string, formData: FormData): Promise<T> => {
     const res = await fetch(url, {
       method: 'POST',
       headers: { ...authHeaders() },

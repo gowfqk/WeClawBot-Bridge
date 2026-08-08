@@ -811,6 +811,58 @@ export function createServer(
     }
   })
 
+  // 测试发送文件到 Agent：与 /test 相同的隔离空会话，媒体按扩展名推断类型后
+  // 序列化为 base64 + mediaType/mediaFileName/mediaFormat 帧字段发给 Agent。
+  const testFileUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 20 * 1024 * 1024 },
+  })
+
+  const mediaTypeFromFileName = (fileName: string): string => {
+    const ext = (fileName.split('.').pop() || '').toLowerCase()
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico'].includes(ext)) return 'image'
+    if (['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v', 'flv'].includes(ext)) return 'video'
+    if (['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'opus', 'silk', 'amr'].includes(ext)) return 'audio'
+    return 'file'
+  }
+
+  app.post('/api/agents/:id/test-file', dynamicAuth, testFileUpload.single('file'), async (req, res) => {
+    const agentId = req.params.id as string
+    const agent = agentRegistry.get(agentId)
+    if (!agent) {
+      res.status(404).json({ error: 'Agent not found' })
+      return
+    }
+    if (!req.file) {
+      res.status(400).json({ error: '请选择要发送的文件' })
+      return
+    }
+    try {
+      const start = Date.now()
+      const fileName = req.file.originalname || 'file'
+      const mediaType = mediaTypeFromFileName(fileName)
+      const format = (fileName.split('.').pop() || '').toLowerCase() || undefined
+      const response = await agentRegistry.invoke(agentId, {
+        message: {
+          text: '文件测试',
+          type: mediaType,
+          media: { type: mediaType, data: req.file.buffer, fileName, format },
+        },
+        session: { userId: SINGLE_USER_ID, agentId, history: [] },
+      })
+      res.json({
+        text: response.reply.text,
+        elapsed: Date.now() - start,
+        fileName,
+        mediaType,
+        mediaBytes: req.file.buffer.length,
+      })
+    } catch (err) {
+      const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
+  })
+
   // ===== WS Agent 状态 API =====
   app.get('/api/ws-agents', dynamicAuth, (_req, res) => {
     if (!wsAgentServer) {

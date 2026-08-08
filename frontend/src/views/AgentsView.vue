@@ -173,6 +173,24 @@
             <span style="color: var(--n-text-color-3); font-size: 12px">耗时: {{ testResult.elapsed }}ms</span>
           </n-space>
         </n-card>
+        <n-divider style="margin: 4px 0 12px">发送文件测试</n-divider>
+        <n-space align="center">
+          <input ref="testFileInputRef" type="file" style="display: none" @change="onTestFileChange" />
+          <n-button @click="pickTestFile">选择文件</n-button>
+          <span v-if="testFileName" style="color: var(--n-text-color-3)">{{ testFileName }}（{{ testFileSize }}）</span>
+          <span v-else style="color: var(--n-text-color-3)">未选择文件（单个 ≤ 20MB）</span>
+          <n-button type="primary" :loading="testFileLoading" :disabled="!testFileName" @click="handleTestFile">
+            发送文件
+          </n-button>
+        </n-space>
+        <n-card v-if="testFileResult" size="small" embedded>
+          <n-space vertical>
+            <span style="white-space: pre-wrap">{{ testFileResult.text }}</span>
+            <span style="color: var(--n-text-color-3); font-size: 12px">
+              文件: {{ testFileResult.fileName }}（{{ testFileResult.mediaType }}，{{ testFileResult.mediaBytes }} bytes）| 耗时: {{ testFileResult.elapsed }}ms
+            </span>
+          </n-space>
+        </n-card>
       </n-space>
     </n-card>
 
@@ -342,6 +360,12 @@ const testAgentId = ref('')
 const testMessage = ref('')
 const testLoading = ref(false)
 const testResult = ref<{ text: string; elapsed: number } | null>(null)
+
+const testFileInputRef = ref<HTMLInputElement | null>(null)
+const testFileName = ref('')
+const testFileSize = ref('')
+const testFileLoading = ref(false)
+const testFileResult = ref<{ text: string; elapsed: number; fileName?: string; mediaType?: string; mediaBytes?: number } | null>(null)
 
 // WS Remote: token 生成与接入指引（仅用于前端展示，不写入 Agent 配置）
 const tokenGenerating = ref(false)
@@ -715,6 +739,54 @@ async function handleTest() {
     message.error(e.message)
   } finally {
     testLoading.value = false
+  }
+}
+
+function pickTestFile() {
+  testFileInputRef.value?.click()
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function onTestFileChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) {
+    testFileName.value = file.name
+    testFileSize.value = formatFileSize(file.size)
+  } else {
+    testFileName.value = ''
+    testFileSize.value = ''
+  }
+}
+
+async function handleTestFile() {
+  if (!testAgentId.value) {
+    message.warning('请先选择 Agent')
+    return
+  }
+  const file = testFileInputRef.value?.files?.[0]
+  if (!file) {
+    message.warning('请先选择文件')
+    return
+  }
+  testFileLoading.value = true
+  testFileResult.value = null
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    testFileResult.value = await api.uploadFile<{ text: string; elapsed: number; fileName?: string; mediaType?: string; mediaBytes?: number }>(
+      `/api/agents/${testAgentId.value}/test-file`,
+      fd,
+    )
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    testFileLoading.value = false
   }
 }
 
