@@ -54,6 +54,59 @@ describe('WsAgentServer error replies', () => {
     expect(intermediate).toEqual(['正在调用工具…'])
   })
 
+  it('delivers media on intermediate (final:false) replies', async () => {
+    httpServer = http.createServer()
+    server = new WsAgentServer()
+    server.setAgentToken('agent-1', 'test-token')
+    server.attach(httpServer)
+    await new Promise<void>((resolve) => httpServer!.listen(0, '127.0.0.1', resolve))
+    const address = httpServer.address()
+    if (!address || typeof address === 'string') throw new Error('test server did not listen')
+
+    client = new WebSocket(`ws://127.0.0.1:${address.port}/ws/agent`)
+    await new Promise<void>((resolve, reject) => {
+      client!.once('error', reject)
+      client!.once('open', () => client!.send(JSON.stringify({
+        type: 'auth', agentId: 'agent-1', token: 'test-token',
+      })))
+      client!.on('message', (raw) => {
+        const message = JSON.parse(raw.toString()) as { type: string; id?: string }
+        if (message.type === 'auth_ok') resolve()
+      })
+    })
+
+    const mediaBase64 = Buffer.from('fake-image-bytes').toString('base64')
+    client.on('message', (raw) => {
+      const message = JSON.parse(raw.toString()) as { type: string; id?: string }
+      if (message.type === 'chat' && message.id) {
+        client!.send(JSON.stringify({
+          type: 'chat',
+          id: message.id,
+          text: '这是图片',
+          media: mediaBase64,
+          mediaType: 'image',
+          mediaFileName: 'photo.jpg',
+          mediaFormat: 'jpeg',
+          final: false,
+        }))
+        setTimeout(() => {
+          client!.send(JSON.stringify({ type: 'chat', id: message.id, text: '最终回答', final: true }))
+        }, 10)
+      }
+    })
+
+    const intermediate: Array<{ text: string; media?: { data: Buffer; type: string; fileName?: string } }> = []
+    await expect(server.invoke('agent-1', {
+      message: { text: 'hello', type: 'text' },
+      session: { userId: 'default', agentId: 'agent-1', history: [] },
+    }, 1_000, (text, media) => intermediate.push({ text, media }))).resolves.toEqual({ reply: { text: '最终回答' } })
+    expect(intermediate).toHaveLength(1)
+    expect(intermediate[0].text).toBe('这是图片')
+    expect(intermediate[0].media?.data.toString()).toBe('fake-image-bytes')
+    expect(intermediate[0].media?.type).toBe('image')
+    expect(intermediate[0].media?.fileName).toBe('photo.jpg')
+  })
+
   it('rejects a pending request when an agent reports a correlated error', async () => {
     httpServer = http.createServer()
     server = new WsAgentServer()

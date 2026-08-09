@@ -16,7 +16,7 @@
 import crypto from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import type { Server } from 'node:http'
-import type { AgentPayload, AgentResponse } from './types'
+import type { AgentMedia, AgentPayload, AgentResponse } from './types'
 import type { Storage } from './types'
 import { createLogger } from './logger'
 import { decodeAgentMedia, serializeAgentPayload } from './media'
@@ -78,8 +78,8 @@ interface PendingRequest {
   resolve: (response: AgentResponse) => void
   reject: (error: Error) => void
   timer: ReturnType<typeof setTimeout>
-  /** Delivers non-final replies while keeping the request open. */
-  onIntermediateReply?: (text: string) => void
+  /** Delivers non-final replies (text and/or media) while keeping the request open. */
+  onIntermediateReply?: (text: string, media?: AgentMedia) => void
 }
 
 interface ConnectedAgent {
@@ -258,7 +258,7 @@ export class WsAgentServer {
     agentId: string,
     payload: AgentPayload,
     timeout = 180000,
-    onIntermediateReply?: (text: string) => void,
+    onIntermediateReply?: (text: string, media?: AgentMedia) => void,
   ): Promise<AgentResponse> {
     const conn = this.connections.get(agentId)
     if (!conn) {
@@ -442,7 +442,19 @@ export class WsAgentServer {
           // Intermediate replies are delivered to WeChat immediately but keep
           // the request pending; only final (or legacy no-flag) replies resolve it.
           if (reply.final === false) {
-            pending.onIntermediateReply?.(reply.text || '')
+            // Media may arrive on non-final frames too (e.g. an Agent streaming
+            // files before the final text). Decode it the same way as final
+            // replies so intermediate media is delivered to WeChat instead of
+            // being silently dropped.
+            const intermediateMedia = decodeAgentMedia(
+              typeof reply.media === 'string'
+                ? { data: reply.media, mediaType: reply.mediaType, mediaFileName: reply.mediaFileName, mediaFormat: reply.mediaFormat }
+                : reply.media,
+            )
+            if (intermediateMedia) {
+              log.info({ agentId, id: reply.id, mediaType: intermediateMedia.type, bytes: intermediateMedia.data.length, fileName: intermediateMedia.fileName }, 'WS Agent 中间回复携带媒体')
+            }
+            pending.onIntermediateReply?.(reply.text || '', intermediateMedia || undefined)
           } else {
             clearTimeout(pending.timer)
             conn.pendingRequests.delete(reply.id)

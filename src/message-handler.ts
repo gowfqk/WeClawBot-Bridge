@@ -26,6 +26,28 @@ export function fallbackFileName(media: AgentMedia): string {
   return /\.\w+$/.test(fileName) ? fileName : `${fileName}${fallback.slice(fallback.lastIndexOf('.'))}`
 }
 
+/** Send one media part (image/video/file/voice) to WeChat, with an optional caption. */
+function sendMediaReply(
+  raw: unknown,
+  media: AgentMedia,
+  caption = '',
+  botManager: BotManager,
+): Promise<void> {
+  const mediaType = (media.type || 'file').toLowerCase()
+  log.info({ mediaType, bytes: media.data.length, fileName: media.fileName }, '回发媒体给微信')
+  if (mediaType === 'image') {
+    return botManager.sendReply(raw, { image: media.data, caption })
+  }
+  if (mediaType === 'video') {
+    return botManager.sendReply(raw, { video: media.data, caption })
+  }
+  // file / voice / unknown — send as generic file with a usable extension.
+  return botManager.sendReply(raw, {
+    file: { data: media.data, fileName: fallbackFileName(media) },
+    caption,
+  })
+}
+
 export interface MessageHandlerContext {
   commandHandler: CommandHandler
   userState: UserStateManager
@@ -172,8 +194,12 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
           },
         }
 
-        const response = await agentRegistry.invoke(currentAgentId, agentPayload, async (intermediateText) => {
-          if (intermediateText.trim()) await reply(intermediateText)
+        const response = await agentRegistry.invoke(currentAgentId, agentPayload, async (intermediateText, intermediateMedia) => {
+          if (intermediateMedia) {
+            await sendMediaReply(raw, intermediateMedia, intermediateText, botManager)
+          } else if (intermediateText.trim()) {
+            await reply(intermediateText)
+          }
         })
         log.info(
           { agentId: currentAgentId, textLen: response.reply.text?.length ?? 0, hasMedia: !!response.reply.media },
@@ -188,22 +214,8 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
         await sessionManager.append(userId, currentAgentId, assistantEntry)
 
         if (response.reply.media) {
-          const media = response.reply.media
-          const caption = response.reply.text
-          const mediaType = (media.type || 'file').toLowerCase()
-          log.info({ mediaType, bytes: media.data.length, fileName: media.fileName }, '回发媒体给微信')
-          if (mediaType === 'image') {
-            await botManager.sendReply(raw, { image: media.data, caption })
-          } else if (mediaType === 'video') {
-            await botManager.sendReply(raw, { video: media.data, caption })
-          } else {
-            // file / voice / unknown — send as generic file with a usable extension.
-            await botManager.sendReply(raw, {
-              file: { data: media.data, fileName: fallbackFileName(media) },
-              caption,
-            })
-          }
-        } else {
+          await sendMediaReply(raw, response.reply.media, response.reply.text, botManager)
+        } else if (response.reply.text) {
           await reply(response.reply.text)
         }
       })

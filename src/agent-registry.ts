@@ -101,7 +101,7 @@ export class AgentRegistry {
   async invoke(
     agentId: string,
     payload: AgentPayload,
-    onIntermediateReply?: (text: string) => void,
+    onIntermediateReply?: (text: string, media?: import('./types').AgentMedia) => void,
   ): Promise<AgentResponse> {
     const agent = this.agents.get(agentId)
     if (!agent) {
@@ -604,7 +604,7 @@ export class AgentRegistry {
   private async invokeWsRemote(
     agentId: string,
     payload: AgentPayload,
-    onIntermediateReply?: (text: string) => void,
+    onIntermediateReply?: (text: string, media?: import('./types').AgentMedia) => void,
   ): Promise<AgentResponse> {
     if (!this.wsAgentServer) {
       const msg = 'WS Agent Server 未初始化。'
