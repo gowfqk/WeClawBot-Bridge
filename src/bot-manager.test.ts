@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 
 const login = vi.fn(async () => ({ accountId: 'account', userId: 'user' }))
-const on = vi.fn()
+const listeners = new Map<string, (...args: unknown[]) => unknown>()
+const on = vi.fn((event: string, listener: (...args: unknown[]) => unknown) => {
+  listeners.set(event, listener)
+})
 const stop = vi.fn()
 const storageDelete = vi.fn(async () => undefined)
 
@@ -73,5 +76,43 @@ describe('BotManager.unbind', () => {
     expect(status.loggedIn).toBe(false)
     expect(status.polling).toBe(false)
     expect(status.qrUrl).toBeUndefined()
+  })
+})
+
+describe('BotManager message dispatch', () => {
+  it('does not block later messages while a handler is waiting for approval', async () => {
+    const manager = new BotManager(new MemoryStorage())
+    let releaseFirst!: () => void
+    const firstPending = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const handled: string[] = []
+
+    manager.onMessage(async (msg) => {
+      handled.push(msg.text)
+      if (msg.text === 'run dangerous command') await firstPending
+    })
+
+    const listener = listeners.get('message')
+    expect(listener).toBeTypeOf('function')
+    const message = (text: string) => ({
+      userId: 'user',
+      text,
+      type: 'text',
+      images: [],
+      files: [],
+      videos: [],
+      voices: [],
+    })
+
+    const firstResult = listener!(message('run dangerous command'))
+    const approveResult = listener!(message('/approve'))
+
+    expect(firstResult).toBeUndefined()
+    expect(approveResult).toBeUndefined()
+    await vi.waitFor(() => expect(handled).toEqual(['run dangerous command', '/approve']))
+
+    releaseFirst()
+    await Promise.resolve()
   })
 })

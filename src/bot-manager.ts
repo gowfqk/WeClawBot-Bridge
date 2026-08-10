@@ -246,7 +246,7 @@ export class BotManager {
   }
 
   onMessage(handler: MessageHandler): void {
-    this.bot.on('message', async (msg) => {
+    this.bot.on('message', (msg) => {
       const hasMedia = msg.images.length > 0
         || msg.files.length > 0
         || msg.videos.length > 0
@@ -255,12 +255,19 @@ export class BotManager {
       // 记录最近的真实用户，供 keepalive 使用
       if (msg.userId) this.lastActiveUser = msg.userId
 
-      await handler({
+      // Do not return/await the handler promise from the SDK listener. The
+      // WeChat SDK waits for all message listeners before polling the next
+      // message. A Hermes turn can be blocked waiting for /approve, so awaiting
+      // here prevents the approval message itself from ever being polled and
+      // creates a deadlock until the approval timeout fires.
+      void handler({
         userId: msg.userId,
         text: msg.text || '',
         type: msg.type,
         hasMedia,
         raw: msg,
+      }).catch((err) => {
+        log.error({ err }, 'Message handler failed')
       })
     })
   }
