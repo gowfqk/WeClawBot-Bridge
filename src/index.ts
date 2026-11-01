@@ -7,11 +7,13 @@ import { AgentRegistry } from './agent-registry'
 import { SessionManager } from './session-manager'
 import { BotManager } from './bot-manager'
 import { NotificationService } from './notification'
+import { OutboundLog } from './outbound-log'
 import { createMessageHandler } from './message-handler'
 import { createServer } from './server'
 import { botStatus } from './metrics'
 import { logger } from './logger'
 import { WsAgentServer } from './ws-agent-server'
+import { ScheduledTaskService } from './scheduled-task-service'
 import { buildWsRemoteAgentConfig } from './ws-agent-registration'
 
 async function main(): Promise<void> {
@@ -47,7 +49,9 @@ async function main(): Promise<void> {
 
   const botManager = new BotManager(storage, 'WeChatAgentGateway/1.0')
 
-  const notificationService = new NotificationService(botManager, storage)
+  const outboundLog = new OutboundLog(storage)
+
+  const notificationService = new NotificationService(botManager, storage, outboundLog)
   await notificationService.loadRules()
 
   for (const agent of config.agents) {
@@ -81,6 +85,7 @@ async function main(): Promise<void> {
     agentRegistry,
     sessionManager,
     botManager,
+    outboundLog,
   })
 
   botManager.onMessage(messageHandler)
@@ -125,6 +130,10 @@ async function main(): Promise<void> {
 
   agentRegistry.setWsAgentServer(wsAgentServer)
 
+  // ===== 定时任务：到点推送（固定文本，或先问 Agent 再推它的回复） =====
+  const scheduledTaskService = new ScheduledTaskService(storage, notificationService, agentRegistry)
+  await scheduledTaskService.load()
+
   const app = createServer(
     config,
     botManager,
@@ -135,6 +144,7 @@ async function main(): Promise<void> {
     sessionManager,
     logger,
     wsAgentServer,
+    scheduledTaskService,
   )
 
   const server = http.createServer(app)
@@ -159,10 +169,12 @@ async function main(): Promise<void> {
   })
 
   notificationService.startScheduler()
+  scheduledTaskService.start()
 
   const shutdown = async () => {
     logger.info('Shutting down...')
     notificationService.stopScheduler()
+    scheduledTaskService.stop()
     agentRegistry.closeAllCliSessions()
     wsAgentServer.close()
     await botManager.stop()

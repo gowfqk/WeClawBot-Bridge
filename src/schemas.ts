@@ -77,6 +77,28 @@ export const SessionConfigSchema = z.object({
   expireMs: z.number().int().nonnegative().max(86400000 * 7).optional(),
 })
 
+/**
+ * 定时任务结构校验。kind/source 之间的组合约束（cron 表达式合法性、once 必须
+ * 在未来、agent 来源必须有可用 Agent 等）在 scheduled-task.ts 的语义校验里完成。
+ */
+export const ScheduledTaskSchema = z.object({
+  id: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/, '任务 ID 只能包含字母、数字、下划线和连字符，最长 64 字符'),
+  name: z.string().min(1, '请输入任务名称').max(60),
+  enabled: z.boolean().optional(),
+  kind: z.enum(['once', 'interval', 'cron']),
+  runAt: z.number().int().positive().optional(),
+  everyMinutes: z.number().int().min(1, '间隔至少 1 分钟').max(60 * 24 * 7, '间隔最多 7 天').optional(),
+  schedule: z.string().max(120).optional(),
+  timezone: z.string().max(64).optional(),
+  source: z.enum(['text', 'agent']),
+  text: z.string().max(4000).optional(),
+  agentId: z.string().max(128).optional(),
+  prompt: z.string().max(4000).optional(),
+  userId: z.string().max(128).optional(),
+})
+
+export type ScheduledTaskInput = z.infer<typeof ScheduledTaskSchema>
+
 /** 配置导入（兼容旧版：description/timeout 可缺，新字段全部 optional） */
 export const ConfigImportSchema = z.object({
   version: z.number().optional(),

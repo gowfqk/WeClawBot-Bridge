@@ -18,6 +18,7 @@ const router = createRouter({
         { path: 'agents', name: 'Agents', component: () => import('../views/AgentsView.vue') },
         { path: 'bot', name: 'Bot', component: () => import('../views/BotView.vue') },
         { path: 'notify', name: 'Notify', component: () => import('../views/NotifyView.vue') },
+        { path: 'scheduled', name: 'ScheduledTasks', component: () => import('../views/ScheduledTasksView.vue') },
         { path: 'sessions', name: 'Sessions', component: () => import('../views/SessionsView.vue') },
         { path: 'settings', name: 'Settings', component: () => import('../views/SettingsView.vue') },
         { path: 'api', name: 'ApiRef', component: () => import('../views/ApiRefView.vue') },

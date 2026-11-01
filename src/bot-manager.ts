@@ -1,5 +1,7 @@
 import { WeChatBot, type Storage, type DownloadedMedia } from '@wechatbot/wechatbot'
 import type { BotStatus, SendContent as GatewaySendContent } from './types'
+import { WECHAT_MAX_TEXT_LENGTH, chunkMarkdown } from './markdown-chunk'
+import { sdkErrorCounter } from './metrics'
 import { createLogger } from './logger'
 
 // Mirrors @wechatbot/wechatbot's STORAGE_KEYS (dist/storage/interface.js).
@@ -14,6 +16,21 @@ const SDK_STORAGE_KEYS = {
 
 const log = createLogger('bot-manager')
 
+type BotContent = Parameters<WeChatBot['reply']>[1]
+
+/**
+ * Maps gateway content to the SDK payload. Unknown/empty content must not slip
+ * through silently: the SDK has no "nothing to send" case, and a silent no-op
+ * is indistinguishable from a delivered message.
+ */
+export function toBotContent(content: GatewaySendContent): BotContent {
+  if (content.text) return { text: content.text }
+  if (content.image) return { image: content.image, caption: content.caption }
+  if (content.video) return { video: content.video, caption: content.caption }
+  if (content.file) return { file: content.file.data, fileName: content.file.fileName, caption: content.caption }
+  throw new Error('发送内容为空，微信侧无内容可投递')
+}
+
 export type MessageHandler = (msg: {
   userId: string
   text: string
@@ -27,6 +44,7 @@ export class BotManager {
   private status: BotStatus = { loggedIn: false, polling: false }
   private currentQrUrl: string | undefined
   private lastActiveUser: string | undefined  // 最近发消息的真实用户
+  private lastSdkError: { at: number; message: string } | undefined
   private loginPromise: Promise<unknown> | null = null
   private qrCallback: ((url: string) => void) | undefined
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null
@@ -68,6 +86,27 @@ export class BotManager {
         polling: true,  // SDK resumes poller automatically after re-login
       }
       this.startKeepalive()
+    })
+
+    // SDK 的 poller 内部会重试网络错误并向上抛；不订阅这些事件的话，
+    // 「消息没送达」只存在于 SDK 自己的 logger 里，面板完全看不见。
+    this.bot.on('error', (err) => {
+      const error = err as Error
+      const kind = error instanceof Error ? error.name : 'unknown'
+      const message = error?.message || String(err)
+      sdkErrorCounter.inc({ kind })
+      this.lastSdkError = { at: Date.now(), message }
+      log.error({ kind, err: message }, 'WeChat SDK 上报错误')
+    })
+
+    this.bot.on('poll:start', () => {
+      this.status.polling = true
+      log.info('微信轮询循环已启动')
+    })
+
+    this.bot.on('poll:stop', () => {
+      this.status.polling = false
+      log.warn('微信轮询循环已停止 — 入站消息在此期间不会送达')
     })
   }
 
@@ -238,7 +277,9 @@ export class BotManager {
   }
 
   getStatus(): BotStatus {
-    return { ...this.status, qrUrl: this.currentQrUrl }
+    const status: BotStatus = { ...this.status, qrUrl: this.currentQrUrl }
+    if (this.lastSdkError) status.lastError = this.lastSdkError
+    return status
   }
 
   get isRunning(): boolean {
@@ -272,29 +313,33 @@ export class BotManager {
     })
   }
 
+  /**
+   * The SDK re-splits any text longer than its 4000-char budget at the nearest
+   * whitespace, which cuts a Markdown code fence in half and leaves the tail
+   * unrendered. Pre-chunking at the same budget keeps every piece inside the
+   * SDK limit, so its chunker never runs and fences stay intact.
+   */
+  private async dispatchText(
+    send: (content: BotContent) => Promise<void>,
+    content: BotContent,
+  ): Promise<void> {
+    const text = typeof content === 'string' ? content : 'text' in content ? content.text : undefined
+    if (!text || text.length <= WECHAT_MAX_TEXT_LENGTH) {
+      await send(content)
+      return
+    }
+    const pieces = chunkMarkdown(text, WECHAT_MAX_TEXT_LENGTH)
+    if (pieces.length > 1) log.info({ chars: text.length, pieces: pieces.length }, '长文本按代码块边界分条发送')
+    for (const piece of pieces) await send({ text: piece })
+  }
+
   async sendReply(raw: unknown, content: GatewaySendContent): Promise<void> {
     const incomingMsg = raw as Parameters<WeChatBot['reply']>[0]
-    if (content.text) {
-      await this.bot.reply(incomingMsg, { text: content.text })
-    } else if (content.image) {
-      await this.bot.reply(incomingMsg, { image: content.image, caption: content.caption })
-    } else if (content.file) {
-      await this.bot.reply(incomingMsg, { file: content.file.data, fileName: content.file.fileName, caption: content.caption })
-    } else if (content.video) {
-      await this.bot.reply(incomingMsg, { video: content.video, caption: content.caption })
-    }
+    await this.dispatchText((c) => this.bot.reply(incomingMsg, c), toBotContent(content))
   }
 
   async send(userId: string, content: GatewaySendContent): Promise<void> {
-    if (content.text) {
-      await this.bot.send(userId, { text: content.text })
-    } else if (content.image) {
-      await this.bot.send(userId, { image: content.image, caption: content.caption })
-    } else if (content.file) {
-      await this.bot.send(userId, { file: content.file.data, fileName: content.file.fileName, caption: content.caption })
-    } else if (content.video) {
-      await this.bot.send(userId, { video: content.video, caption: content.caption })
-    }
+    await this.dispatchText((c) => this.bot.send(userId, c), toBotContent(content))
   }
 
   async download(msg: { raw: unknown }): Promise<DownloadedMedia | null> {

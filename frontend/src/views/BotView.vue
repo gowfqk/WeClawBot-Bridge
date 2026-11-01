@@ -21,6 +21,15 @@
                 {{ botStatus.polling ? '运行中' : '停止' }}
               </n-tag>
             </n-descriptions-item>
+            <n-descriptions-item label="最近 SDK 错误" :span="2">
+              <template v-if="botStatus.lastError">
+                <n-space align="center" :size="8">
+                  <n-time :time="botStatus.lastError.at" type="datetime" />
+                  <span style="font-size: 12px">{{ botStatus.lastError.message }}</span>
+                </n-space>
+              </template>
+              <span v-else>无</span>
+            </n-descriptions-item>
           </n-descriptions>
         </n-card>
       </n-gi>
@@ -84,6 +93,7 @@ interface BotStatusInfo {
   currentUser?: string
   qrUrl?: string
   polling: boolean
+  lastError?: { at: number; message: string }
 }
 
 const message = useMessage()

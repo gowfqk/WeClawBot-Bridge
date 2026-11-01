@@ -1,9 +1,9 @@
 import cron from 'node-cron'
 import type { ScheduledTask } from 'node-cron'
-import type { Storage, NotificationRule, NotificationLog, SendContent } from './types'
+import type { Storage, NotificationRule, NotificationLog, SendContent, SendLogSource } from './types'
 import type { BotManager } from './bot-manager'
+import type { OutboundLog } from './outbound-log'
 import { NoContextError } from '@wechatbot/wechatbot'
-import crypto from 'node:crypto'
 import { createLogger } from './logger'
 
 const log = createLogger('notification')
@@ -15,13 +15,15 @@ const NOTIFICATION_RULES_KEY = 'config:notification_rules'
 export class NotificationService {
   private botManager: BotManager
   private storage: Storage
+  private outboundLog: OutboundLog
   private rules: Map<string, NotificationRule> = new Map()
   private cronJobs: Map<string, ScheduledTask> = new Map()
   private eventHandlers: Map<string, () => Promise<void>> = new Map()
 
-  constructor(botManager: BotManager, storage: Storage) {
+  constructor(botManager: BotManager, storage: Storage, outboundLog: OutboundLog) {
     this.botManager = botManager
     this.storage = storage
+    this.outboundLog = outboundLog
   }
 
   private resolveRecipient(userId?: string): string {
@@ -31,40 +33,25 @@ export class NotificationService {
     throw new Error('Bot 未登录，无法发送通知')
   }
 
-  async send(userId: string | undefined, content: SendContent): Promise<void> {
+  async send(userId: string | undefined, content: SendContent, sourceId?: string): Promise<void> {
     const recipient = this.resolveRecipient(userId)
-    const logId = crypto.randomUUID()
-    const logEntry: NotificationLog = {
-      id: logId,
-      userId: recipient,
-      content,
-      status: 'success',
-      timestamp: Date.now(),
-    }
+    // 定时任务服务用 `task:{id}` 作为 sourceId 传进来，据此区分记录来源。
+    const source: SendLogSource = sourceId?.startsWith('task:') ? 'task' : 'notify'
 
     let lastError: Error | undefined
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         await this.botManager.send(recipient, content)
-        logEntry.status = 'success'
-        delete logEntry.error
-        await this.storage.set(`notify:log:${logId}`, logEntry)
+        await this.outboundLog.record({ source, userId: recipient, content, status: 'success', ruleId: sourceId })
         return
       } catch (err) {
         lastError = err as Error
-        logEntry.status = 'failed'
-        logEntry.error = (err as Error).message
-        // Logging the failure must never itself abort the retry loop.
-        try {
-          await this.storage.set(`notify:log:${logId}`, logEntry)
-        } catch (logErr) {
-          log.warn({ logId, err: (logErr as Error).message }, 'Failed to persist notification log entry')
-        }
-
+        const error = err as Error
         // 无 context_token 时重试无意义 — 直接失败
         if (err instanceof NoContextError) {
-          log.warn({ recipient, err: (err as Error).message }, 'No context_token — send failed (not retrying)')
+          await this.outboundLog.record({ source, userId: recipient, content, status: 'failed', error: error.message, ruleId: sourceId })
+          log.warn({ recipient, err: error.message }, 'No context_token — send failed (not retrying)')
           throw err
         }
 
@@ -74,6 +61,14 @@ export class NotificationService {
       }
     }
 
+    await this.outboundLog.record({
+      source,
+      userId: recipient,
+      content,
+      status: 'failed',
+      error: lastError?.message ?? '发送失败',
+      ruleId: sourceId,
+    })
     if (lastError) throw lastError
   }
 
@@ -196,14 +191,6 @@ export class NotificationService {
   }
 
   async getNotificationLogs(): Promise<NotificationLog[]> {
-    const keys = await this.storage.listKeys('notify:log:')
-    const logs: NotificationLog[] = []
-    for (const key of keys) {
-      const log = await this.storage.get<NotificationLog>(key)
-      if (log) logs.push(log)
-    }
-    // 按时间倒序排列，最新的在前
-    logs.sort((a, b) => b.timestamp - a.timestamp)
-    return logs
+    return this.outboundLog.list()
   }
 }

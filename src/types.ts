@@ -112,14 +112,64 @@ export interface NotificationRule {
   content: SendContent
 }
 
+/** 出站发送记录的来源：通知规则、定时任务、对话回复 */
+export type SendLogSource = 'notify' | 'task' | 'reply'
+
+/** 发送记录里的内容摘要 — 媒体只留类型和字节数，不把 Buffer 写进存储。 */
+export interface SendLogContent {
+  text?: string
+  media?: {
+    kind: 'image' | 'video' | 'file'
+    fileName?: string
+    bytes: number
+  }
+}
+
 export interface NotificationLog {
   id: string
   ruleId?: string
+  /** 缺省 = 本次改造之前的历史记录，等同于 'notify' */
+  source?: SendLogSource
   userId: string
-  content: SendContent
+  content: SendLogContent
+  /** 触发本轮发送的用户消息摘要，仅对话回复路径写入 */
+  trigger?: string
   status: 'success' | 'failed'
   error?: string
   timestamp: number
+}
+
+export type ScheduledTaskKind = 'once' | 'interval' | 'cron'
+export type ScheduledTaskSource = 'text' | 'agent'
+export type ScheduledTaskRunStatus = 'success' | 'failed' | 'skipped'
+
+export interface ScheduledTask {
+  id: string
+  name: string
+  enabled: boolean
+  kind: ScheduledTaskKind
+  /** kind=once：绝对时间戳（毫秒） */
+  runAt?: number
+  /** kind=interval：间隔分钟数 */
+  everyMinutes?: number
+  /** kind=cron：5/6 段 cron 表达式 */
+  schedule?: string
+  /** kind=cron：IANA 时区，缺省 Asia/Shanghai */
+  timezone?: string
+  /** text=直接推送 text；agent=先调用 agentId 再把回复推给用户 */
+  source: ScheduledTaskSource
+  text?: string
+  agentId?: string
+  prompt?: string
+  /** 留空则发给当前绑定的微信用户 */
+  userId?: string
+  createdAt: number
+  /** 下一次应执行的时刻；null/undefined 表示不再有下次 */
+  nextRunAt?: number | null
+  lastRunAt?: number
+  lastStatus?: ScheduledTaskRunStatus
+  lastError?: string
+  runCount: number
 }
 
 export interface BotStatus {
@@ -128,6 +178,8 @@ export interface BotStatus {
   currentUser?: string
   qrUrl?: string
   polling: boolean
+  /** 微信 SDK 最近一次上报的错误 — 消息没送达时的主要线索 */
+  lastError?: { at: number; message: string }
 }
 
 export interface CommandResult {

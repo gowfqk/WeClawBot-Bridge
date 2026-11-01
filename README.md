@@ -7,7 +7,8 @@
 - **一个 Bot，多种 Agent**：微信用 `#命令` 切换 HTTP、CLI、WS Remote Agent；每个 Agent 保留独立对话历史。
 - **插件接入**：Hermes、OpenClaw、QwenPaw 通过专用 Channel 接入；Claude Code、OpenCode、Codex CLI 也可通过 WS SDK 接入。Bridge 自动生成 Token 与对应安装指引。
 - **OpenAI 兼容 API**：`POST /v1/chat/completions` 以 `model` = Agent ID 路由到指定 Agent，支持 `GET /v1/models` 与 SSE 响应。
-- **管理与运维**：内置 Agent、会话、Bot 登录、通知和 API 参考面板；支持二维码自动刷新、Webhook、结构化日志与 Prometheus 指标。
+- **管理与运维**：内置 Agent、会话、Bot 登录、通知、定时任务和 API 参考面板；支持二维码自动刷新、Webhook、结构化日志与 Prometheus 指标。
+- **定时推送**：一次性提醒、固定间隔与 cron 三种调度，内容可以是固定文本，也可以到点先调用 Agent、推送它的回复；默认北京时间，重启后不重复补推。
 - **安全与可靠性**：密码/API Key 认证、CSRF 防护、可选加密存储、WS 自动重连，以及轮询健康恢复。
 
 ## 🚀 快速开始
@@ -157,6 +158,14 @@ docker run -d \
 | GET | `/api/sessions/config` | 获取会话配置 |
 | PUT | `/api/sessions/config` | 更新会话配置（轮次/过期时间） |
 | POST | `/api/notify` | 发送通知消息 |
+| GET | `/api/notify/log` | 出站发送记录（通知 / 定时任务 / 对话回复，含失败原因） |
+| GET | `/api/scheduled-tasks` | 列出定时任务（含下次执行时间） |
+| POST | `/api/scheduled-tasks` | 新建定时任务 |
+| PUT | `/api/scheduled-tasks/:id` | 更新定时任务 |
+| DELETE | `/api/scheduled-tasks/:id` | 删除定时任务 |
+| POST | `/api/scheduled-tasks/:id/toggle` | 启用/停用（body 省略 `enabled` 时取反） |
+| POST | `/api/scheduled-tasks/:id/run` | 立即试跑一次（一次性任务会被置为已执行） |
+| GET | `/api/scheduled-tasks/preview-next` | 预览 cron+时区的下次触发时刻（`?schedule=0 9 * * *&timezone=Asia/Shanghai`） |
 | POST | `/api/webhook` | Webhook 推送（userId 可选） |
 
 ### OpenAI 兼容调用
@@ -245,6 +254,74 @@ curl -X POST https://your-domain/api/webhook \
 
 默认配置：对话轮次不限制，会话永不过期。
 
+## ⏰ 定时任务
+
+面板「定时任务」页（`/scheduled`）用于到点主动推送到微信，与「通知管理」里的通知规则彼此独立、互不影响。
+
+**三种调度方式**
+
+| 类型 | 配置项 | 说明 |
+|------|--------|------|
+| 一次性 | 执行时间 | 到点推送一次后自动停用；改时间可重新触发 |
+| 固定间隔 | 间隔分钟数（1 分钟 ~ 7 天） | 从上次执行时刻往后推，首次从创建时刻起算 |
+| Cron | 5 或 6 段表达式 + 时区 | 默认时区 **Asia/Shanghai**，容器是 UTC 也不受影响 |
+
+**两种内容来源**
+
+- **固定文本**：到点原样推送。
+- **先问 Agent**：到点用任务自己的提示词调用所选 Agent，把它的回复推送过来。每次调用都走独立会话、不携带任何历史，既不打扰你与 Agent 的微信对话，也不会把昨天的内容滚进今天的提问。
+
+**行为细节**
+
+- 单个 tick 循环（默认 20 秒）统一驱动所有任务，每个任务持久化自己的 `nextRunAt`，因此重启后不需要重建定时器，面板也能直接显示「下次执行时间」。
+- 服务停机、容器重启导致错过的执行点，只在 **15 分钟宽限期**内补跑；更久以前的一律标记为「已跳过」并顺延到下一个点，避免恢复时集中轰炸微信。
+- 校验严格：非法 cron 表达式、无法识别的时区、未来一年内不会触发的表达式、指向已删除 Agent 的任务，都会在保存时被拒绝并给出中文原因。
+- 失败与跳过的原因记录在任务本身上（列表「上次结果」一列），微信 Bot 离线时也不会静默丢消息。
+- 「试跑」按钮立即执行一次并推送，用于验证 Agent 与文案；除一次性任务外不会改动原排期。
+
+curl 示例（这些接口属于管理面板，使用登录后写入的 HttpOnly Cookie 认证；`API_KEY` 只用于 `/v1` 与 Webhook）：
+
+```bash
+# 先登录拿 cookie
+curl -s -X POST https://your-domain/api/auth/login \
+  -H "Content-Type: application/json" \
+  -c /tmp/weclaw.jar \
+  -d '{"password":"你的管理密码"}'
+
+# 每个工作日北京时间 09:00，先问 Agent 再推送它的回复
+curl -s -X POST https://your-domain/api/scheduled-tasks \
+  -b /tmp/weclaw.jar \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "morning-brief",
+    "name": "早报",
+    "kind": "cron",
+    "schedule": "0 9 * * 1-5",
+    "timezone": "Asia/Shanghai",
+    "source": "agent",
+    "agentId": "hermes",
+    "prompt": "给我 5 条今天的科技要闻，每条一句话"
+  }'
+
+# 查看某条 cron + 时区的下次触发时刻
+curl -s -G https://your-domain/api/scheduled-tasks/preview-next \
+  -b /tmp/weclaw.jar \
+  --data-urlencode "schedule=0 9 * * 1-5" \
+  --data-urlencode "timezone=Asia/Shanghai"
+```
+
+## 📮 消息送达与失败排查
+
+微信 iLink Bot 协议只有「服务端是否受理」，**没有送达回执，也没有已读回执**。Bridge 能给出的上限是：调用微信接口有没有成功、失败原因是什么。
+
+- **面板「通知」页 → 发送记录**：三类来源都会记 —— `通知`（规则和 Webhook）、`定时任务`、`对话回复`。记录只存文本摘要和媒体的类型/大小，不存二进制。
+- **对话回复失败**：`内容` 是没发出去的回复，没有内容时回退显示 `触发` 字段（用户原文），`错误` 是 SDK 原始报错。
+- **指标**：`gateway_send_failures_total{source}`、`gateway_sdk_errors_total{kind}`、`gateway_bot_online`，见 `/api/metrics`。
+- **`No context_token cached for user …`**：该用户还没给 bot 发过消息，或 session 过期重登后 SDK 清空了上下文。主动推送（通知/定时任务）在此之前一定失败，需要用户在微信里先发一条消息。
+- **Bot 页「最近 SDK 错误」**：轮询中断、微信侧限流等入站问题看这里；轮询停止期间消息不会送达，健康检查会自动重启。
+- **长回复分条**：微信单条文本上限 4000 字，超出后 SDK 会按段落/换行/空格切一刀 —— 这会把 ` ``` ` 代码围栏拦腰截断，后半段的 Markdown 不再渲染。Bridge 先用 `markdown-chunk.ts` 按围栏边界切好再逐条发，每条都是完整代码块（超长围栏会重开围栏并带上原语言标记）。分条中途失败时前面几条已投递、无法撤回，发送记录里留下的是整条原文的摘要。
+- **入站是 at-most-once**：SDK 先推进游标再交给处理器，进程在处理中途崩溃会丢掉那一条且不会记录。
+
 ## 🏗️ 项目结构
 
 ```
@@ -252,15 +329,19 @@ WeClawBot-Bridge/
 ├── src/                    # 后端源码 (Express + TypeScript)
 │   ├── server.ts           # Express 服务器、路由、中间件
 │   ├── index.ts            # 入口
+│   ├── scheduled-task.ts           # 定时任务纯逻辑：校验 + 下次执行时刻
+│   ├── scheduled-task-service.ts   # 定时任务调度：tick 循环、推送、补跑宽限
+│   ├── outbound-log.ts             # 出站发送记录：通知/定时任务/对话回复的成功与失败
+│   ├── markdown-chunk.ts           # 长文本分条：按 ``` 代码块边界切，不切断围栏
 │   └── ...
 ├── frontend/               # 前端源码 (Vue 3 + Vite)
 │   ├── src/
-│   │   ├── views/          # 页面组件 (Agents, Bot, Notify, Sessions, Settings, ApiRef)
+│   │   ├── views/          # 页面组件 (Agents, Bot, Notify, Scheduled, Sessions, Settings, ApiRef)
 │   │   ├── layouts/        # 布局组件 (AppLayout + 侧边栏)
 │   │   ├── components/     # 通用组件 (ApiMethod, ApiParams)
 │   │   ├── composables/    # API 层 (axios 封装)
 │   │   ├── stores/         # Pinia 状态 (auth, theme)
-│   │   ├── router/         # Vue Router (6 页面 + 登录守卫)
+│   │   ├── router/         # Vue Router (7 页面 + 登录守卫)
 │   │   └── App.vue         # 根组件 (Naive UI providers)
 │   ├── vite.config.ts      # Vite 配置 (自动导入 Naive UI 组件)
 │   └── tsconfig.json

@@ -134,7 +134,7 @@
           <n-card id="doc-notify" title="📢 通知与 Webhook">
             <n-text>两种方式向微信推送消息：</n-text>
             <n-h4 style="margin: 12px 0 4px">管理面板通知</n-h4>
-            <n-text depth="3">通知管理页面 → 输入内容 → 发送，支持文本和 Markdown 格式。</n-text>
+            <n-text depth="3">通知管理页面 → 输入内容 → 发送，支持文本和 Markdown 格式。单条超过 4000 字时按代码块边界自动分成多条，不会把 ``` 围栏切断。</n-text>
             <n-h4 style="margin: 12px 0 4px">Webhook（CI/CD 集成）</n-h4>
             <n-text depth="3" style="font-size: 13px; display: block">
               curl -X POST https://your-domain/api/webhook \\<br>
@@ -144,6 +144,31 @@
             </n-text>
             <n-text depth="3" style="display: block; margin-top: 8px">
               无需 userId，Bot 在线即可推送。适合 GitHub Actions、定时任务等场景。
+            </n-text>
+            <n-h4 style="margin: 12px 0 4px">发送记录</n-h4>
+            <n-text depth="3">
+              通知页底部的「发送记录」汇总三类出站发送：通知、定时任务、对话回复。对话回复失败时会记录未送达的内容和触发它的用户消息。
+              微信协议没有送达/已读回执，这里能给出的上限是「接口调用是否成功 + 原始错误」。
+            </n-text>
+          </n-card>
+
+          <!-- 定时任务 -->
+          <n-card id="doc-scheduled" title="⏰ 定时任务">
+            <n-text>侧边栏「定时任务」用于到点主动推送到微信，与「通知管理」的通知规则互相独立。</n-text>
+            <n-ul style="margin-top: 12px">
+              <n-li>一次性：指定时刻推送一次，推完自动停用；改时间可重新触发。</n-li>
+              <n-li>固定间隔：每 N 分钟推一次（1 分钟 ~ 7 天）。</n-li>
+              <n-li>Cron：5 或 6 段表达式，时区默认北京时间，容器是 UTC 也不受影响。</n-li>
+            </n-ul>
+            <n-h4 style="margin: 12px 0 4px">内容来源</n-h4>
+            <n-text depth="3">
+              可以推固定文本，也可以选择「先问 Agent」：到点把提示词发给所选 Agent，再把它这一次的回复推给你。
+              这类调用使用任务自己的独立会话、不携带历史，既不打扰你和 Agent 的微信对话，也不会把昨天的内容带进今天的问题里。
+            </n-text>
+            <n-h4 style="margin: 12px 0 4px">错过时间怎么办</n-h4>
+            <n-text depth="3">
+              服务停机或容器重启期间错过的执行点，只在 15 分钟内补跑；更早的一律标记为「已跳过」并顺延到下一个点，
+              避免恢复时集中轰炸微信。失败与跳过的原因会显示在列表「上次结果」一列。「试跑」可随时验证文案与 Agent 是否正常。
             </n-text>
           </n-card>
 
@@ -224,6 +249,7 @@ const tocMenuOptions: MenuOption[] = [
   { label: '🔗 OpenAI 兼容 API', key: 'doc-openai' },
   { label: '📝 会话管理', key: 'doc-sessions' },
   { label: '📢 通知与 Webhook', key: 'doc-notify' },
+  { label: '⏰ 定时任务', key: 'doc-scheduled' },
   { label: '🔌 WS Agent 状态', key: 'doc-ws-status' },
   { label: '💾 配置备份', key: 'doc-backup' },
   { label: '❓ 常见问题', key: 'doc-faq' },

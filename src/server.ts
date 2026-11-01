@@ -8,6 +8,8 @@ import type { NotificationService } from './notification'
 import type { SessionManager } from './session-manager'
 import type { AppConfig } from './config'
 import type { WsAgentServer } from './ws-agent-server'
+import type { ScheduledTaskService, TaskMutationResult } from './scheduled-task-service'
+import { DEFAULT_TASK_TIMEZONE, nextCronRunAt, cronScheduleError, isValidTimezone } from './scheduled-task'
 import { saveAgents } from './config'
 import type { Storage } from './types'
 import { API_KEY_STORAGE_KEY } from './types'
@@ -39,6 +41,7 @@ export function createServer(
   sessionManager: SessionManager,
   logger: Logger,
   wsAgentServer?: WsAgentServer,
+  scheduledTaskService?: ScheduledTaskService,
 ) {
   const app = express()
 
@@ -972,6 +975,106 @@ export function createServer(
   app.get('/api/notify/log', dynamicAuth, async (_req, res) => {
     const logs = await notificationService.getNotificationLogs()
     res.json(logs)
+  })
+
+  // ===== 定时任务 =====
+  // 独立于上面「通知规则」的模块：支持一次性提醒 / 固定间隔 / cron，
+  // 内容可以是固定文本，也可以到点先调用 Agent 再推送它的回复。
+  const requireTaskService = (
+    res: import('express').Response,
+  ): ScheduledTaskService | null => {
+    if (!scheduledTaskService) {
+      res.status(503).json({ error: '定时任务模块未启用' })
+      return null
+    }
+    return scheduledTaskService
+  }
+
+  const respondTask = (
+    res: import('express').Response,
+    result: TaskMutationResult,
+    status: 200 | 201,
+  ): void => {
+    if (result.ok) {
+      res.status(status).json(result.task)
+      return
+    }
+    res.status(result.status).json({ error: result.error })
+  }
+
+  app.get('/api/scheduled-tasks', dynamicAuth, async (_req, res) => {
+    const service = requireTaskService(res)
+    if (!service) return
+    res.json(service.list())
+  })
+
+  // 预览 cron + 时区的下一次触发时刻，供面板实时提示「将在 ... 执行」。
+  // 放在 /:id 之前，避免被当成任务 ID 匹配。
+  app.get('/api/scheduled-tasks/preview-next', dynamicAuth, async (req, res) => {
+    const schedule = typeof req.query.schedule === 'string' ? req.query.schedule.trim() : ''
+    const timezone = (typeof req.query.timezone === 'string' && req.query.timezone.trim())
+      || DEFAULT_TASK_TIMEZONE
+    if (!schedule) {
+      res.status(400).json({ error: '请填写 Cron 表达式' })
+      return
+    }
+    const scheduleError = cronScheduleError(schedule)
+    if (scheduleError) {
+      res.status(400).json({ error: scheduleError })
+      return
+    }
+    if (!isValidTimezone(timezone)) {
+      res.status(400).json({ error: `时区 "${timezone}" 无法识别，请使用 IANA 名称（如 Asia/Shanghai）` })
+      return
+    }
+    const nextRunAt = nextCronRunAt(schedule, timezone)
+    if (nextRunAt === null) {
+      res.status(400).json({ error: '该 Cron 表达式在未来一年内没有触发点' })
+      return
+    }
+    res.json({ nextRunAt, timezone })
+  })
+
+  app.post('/api/scheduled-tasks', dynamicAuth, async (req, res) => {
+    const service = requireTaskService(res)
+    if (!service) return
+    respondTask(res, await service.create(req.body), 201)
+  })
+
+  app.put('/api/scheduled-tasks/:id', dynamicAuth, async (req, res) => {
+    const service = requireTaskService(res)
+    if (!service) return
+    respondTask(res, await service.update(req.params.id as string, req.body), 200)
+  })
+
+  app.delete('/api/scheduled-tasks/:id', dynamicAuth, async (req, res) => {
+    const service = requireTaskService(res)
+    if (!service) return
+    const removed = await service.remove(req.params.id as string)
+    if (!removed.ok) {
+      res.status(404).json({ error: '任务不存在' })
+      return
+    }
+    res.json({ ok: true })
+  })
+
+  app.post('/api/scheduled-tasks/:id/toggle', dynamicAuth, async (req, res) => {
+    const service = requireTaskService(res)
+    if (!service) return
+    const id = req.params.id as string
+    const current = service.get(id)
+    if (!current) {
+      res.status(404).json({ error: '任务不存在' })
+      return
+    }
+    const enabled = typeof req.body?.enabled === 'boolean' ? req.body.enabled : !current.enabled
+    respondTask(res, await service.setEnabled(id, enabled), 200)
+  })
+
+  app.post('/api/scheduled-tasks/:id/run', dynamicAuth, async (req, res) => {
+    const service = requireTaskService(res)
+    if (!service) return
+    respondTask(res, await service.runNow(req.params.id as string), 200)
   })
 
   // ===== Webhook 认证 =====

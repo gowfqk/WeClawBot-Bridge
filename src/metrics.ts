@@ -30,6 +30,20 @@ export const botStatus = new Gauge({
   registers: [register],
 })
 
+export const sendFailureCounter = new Counter({
+  name: 'gateway_send_failures_total',
+  help: 'Outbound messages the gateway could not hand to WeChat',
+  labelNames: ['source'],
+  registers: [register],
+})
+
+export const sdkErrorCounter = new Counter({
+  name: 'gateway_sdk_errors_total',
+  help: 'Errors reported by the WeChat SDK event loop',
+  labelNames: ['kind'],
+  registers: [register],
+})
+
 export function getMetrics(): Promise<string> {
   return register.metrics()
 }

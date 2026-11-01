@@ -7,17 +7,21 @@ const on = vi.fn((event: string, listener: (...args: unknown[]) => unknown) => {
 })
 const stop = vi.fn()
 const storageDelete = vi.fn(async () => undefined)
+const botReply = vi.fn(async (_msg: unknown, _content: unknown) => {})
+const botSend = vi.fn(async (_userId: string, _content: unknown) => {})
 
 vi.mock('@wechatbot/wechatbot', () => ({
   WeChatBot: class {
     login = login
     on = on
     stop = stop
+    reply = botReply
+    send = botSend
     storage = { delete: storageDelete }
   },
 }))
 
-import { BotManager } from './bot-manager'
+import { BotManager, toBotContent } from './bot-manager'
 import { MemoryStorage } from './storage'
 
 describe('BotManager credential recovery', () => {
@@ -76,6 +80,89 @@ describe('BotManager.unbind', () => {
     expect(status.loggedIn).toBe(false)
     expect(status.polling).toBe(false)
     expect(status.qrUrl).toBeUndefined()
+  })
+})
+
+describe('toBotContent', () => {
+  it('映射四类内容并在没有任何内容时抛错', async () => {
+    const png = Buffer.from('png')
+    expect(toBotContent({ text: 'hi' })).toEqual({ text: 'hi' })
+    expect(toBotContent({ image: png })).toEqual({ image: png })
+    expect(toBotContent({ video: png })).toEqual({ video: png })
+    expect(toBotContent({ file: { data: png, fileName: 'a.pdf' } })).toEqual({
+      file: png,
+      fileName: 'a.pdf',
+    })
+    // 过去这里会静默「发送成功」，用户端什么都收不到。
+    expect(() => toBotContent({ caption: '只有一句说明' })).toThrow(/内容为空/)
+    expect(() => toBotContent({})).toThrow(/内容为空/)
+  })
+})
+
+describe('BotManager SDK 事件', () => {
+  it('轮询循环的启停反映在轮询状态上', () => {
+    const manager = new BotManager(new MemoryStorage())
+    expect(manager.getStatus().polling).toBe(false)
+
+    listeners.get('poll:start')!()
+    expect(manager.getStatus().polling).toBe(true)
+
+    listeners.get('poll:stop')!()
+    expect(manager.getStatus().polling).toBe(false)
+  })
+
+  it('SDK 错误记入状态，成为「消息没送达」的第一线索', () => {
+    const manager = new BotManager(new MemoryStorage())
+    expect(manager.getStatus().lastError).toBeUndefined()
+
+    listeners.get('error')!(new Error('getupdates timeout'))
+    const status = manager.getStatus()
+    expect(status.lastError?.message).toBe('getupdates timeout')
+    expect(status.lastError?.at).toBeGreaterThan(0)
+  })
+
+  it('非 Error 的 SDK 上报也不会丢失', () => {
+    const manager = new BotManager(new MemoryStorage())
+    listeners.get('error')!('字符串错误')
+    expect(manager.getStatus().lastError?.message).toBe('字符串错误')
+  })
+})
+
+describe('BotManager 长文本分条', () => {
+  const sentTexts = (mock: typeof botReply) =>
+    mock.mock.calls.map(([, content]) => (content as { text: string }).text)
+
+  it('超出 SDK 4000 字预算时自己按代码块边界分条，不让 SDK 从围栏中间切断', async () => {
+    botReply.mockClear()
+    const body = Array.from({ length: 900 }, (_, i) => `  const value${i} = ${i}`).join('\n')
+    const text = `前置说明。\n\n\`\`\`js\n${body}\n\`\`\`\n\n后置说明。`
+    expect(text.length).toBeGreaterThan(4000)
+
+    const manager = new BotManager(new MemoryStorage())
+    await manager.sendReply({ from_user_id: 'user' }, { text })
+
+    const pieces = sentTexts(botReply)
+    expect(pieces.length).toBeGreaterThan(1)
+    for (const piece of pieces) {
+      expect(piece.length).toBeLessThanOrEqual(4000)
+      const fences = piece.split('\n').filter((line) => /^ {0,3}(`{3,}|~{3,})/.test(line)).length
+      expect(fences % 2, `围栏被切断:\n${piece.slice(0, 80)}…`).toBe(0)
+    }
+    expect(pieces.join('\n')).toContain('前置说明。')
+    expect(pieces.at(-1)).toContain('后置说明。')
+  })
+
+  it('预算内的文本与媒体内容原样单次发送', async () => {
+    botReply.mockClear()
+    botSend.mockClear()
+    const manager = new BotManager(new MemoryStorage())
+
+    await manager.sendReply({ from_user_id: 'user' }, { text: '短回复\n\n```js\nok\n```' })
+    expect(sentTexts(botReply)).toEqual(['短回复\n\n```js\nok\n```'])
+
+    await manager.send('user', { image: Buffer.from('png') })
+    expect(botSend).toHaveBeenCalledTimes(1)
+    expect(botSend.mock.calls[0][1]).toMatchObject({ image: Buffer.from('png') })
   })
 })
 

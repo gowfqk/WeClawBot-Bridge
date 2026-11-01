@@ -3,11 +3,15 @@ import type { UserStateManager } from './user-state'
 import type { AgentRegistry } from './agent-registry'
 import type { SessionManager } from './session-manager'
 import type { BotManager } from './bot-manager'
+import type { OutboundLog } from './outbound-log'
 import { createLogger } from './logger'
 import { normalizeUserId } from './single-user'
 
 const log = createLogger('message-handler')
-import type { AgentMedia, ChatEntry } from './types'
+import type { AgentMedia, ChatEntry, SendContent } from './types'
+
+/** 本轮完全没有任何内容可发时的占位回复，避免用户无限等待。 */
+const EMPTY_REPLY_HINT = '本轮没有生成回复内容，请重试或换个说法。'
 
 /**
  * Fallback filename when the Agent omits one. The SDK routes `{file, fileName}`
@@ -26,26 +30,16 @@ export function fallbackFileName(media: AgentMedia): string {
   return /\.\w+$/.test(fileName) ? fileName : `${fileName}${fallback.slice(fallback.lastIndexOf('.'))}`
 }
 
-/** Send one media part (image/video/file/voice) to WeChat, with an optional caption. */
-function sendMediaReply(
-  raw: unknown,
-  media: AgentMedia,
-  caption = '',
-  botManager: BotManager,
-): Promise<void> {
+/**
+ * Map an Agent media part onto the gateway send payload. The SDK routes
+ * `{file, fileName}` by extension, so file/voice keep an extension that
+ * `fallbackFileName()` guarantees.
+ */
+export function toSendContent(media: AgentMedia, caption = ''): SendContent {
   const mediaType = (media.type || 'file').toLowerCase()
-  log.info({ mediaType, bytes: media.data.length, fileName: media.fileName }, '回发媒体给微信')
-  if (mediaType === 'image') {
-    return botManager.sendReply(raw, { image: media.data, caption })
-  }
-  if (mediaType === 'video') {
-    return botManager.sendReply(raw, { video: media.data, caption })
-  }
-  // file / voice / unknown — send as generic file with a usable extension.
-  return botManager.sendReply(raw, {
-    file: { data: media.data, fileName: fallbackFileName(media) },
-    caption,
-  })
+  if (mediaType === 'image') return { image: media.data, caption }
+  if (mediaType === 'video') return { video: media.data, caption }
+  return { file: { data: media.data, fileName: fallbackFileName(media) }, caption }
 }
 
 export interface MessageHandlerContext {
@@ -54,6 +48,7 @@ export interface MessageHandlerContext {
   agentRegistry: AgentRegistry
   sessionManager: SessionManager
   botManager: BotManager
+  outboundLog: OutboundLog
 }
 
 export function createMessageHandler(ctx: MessageHandlerContext) {
@@ -78,13 +73,28 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
     hasMedia: boolean
     raw: unknown
   }): Promise<void> => {
-    const { commandHandler, userState, agentRegistry, sessionManager, botManager } = ctx
+    const { commandHandler, userState, agentRegistry, sessionManager, botManager, outboundLog } = ctx
     const { userId: senderId, text, type, raw } = msg
     // 单用户设计：真实微信 senderId 只用于回消息/typing；业务状态和会话统一归到 default。
     const userId = normalizeUserId(senderId)
 
-    const reply = async (text: string) => {
-      await botManager.sendReply(raw, { text })
+    // delivered / pendingContent 用来回答两个问题：这一轮到底发出去了没有，
+    // 以及失败时没送达的到底是哪段内容。
+    let delivered = false
+    let pendingContent: SendContent | undefined
+
+    const deliver = async (content: SendContent): Promise<void> => {
+      pendingContent = content
+      await botManager.sendReply(raw, content)
+      delivered = true
+      pendingContent = undefined
+    }
+
+    const reply = (replyText: string) => deliver({ text: replyText })
+
+    const deliverMedia = (media: AgentMedia, caption = '') => {
+      log.info({ mediaType: media.type, bytes: media.data.length, fileName: media.fileName }, '回发媒体给微信')
+      return deliver(toSendContent(media, caption))
     }
 
     try {
@@ -140,7 +150,10 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
       }
 
       await enqueueSessionMessage(`${userId}:${currentAgentId}`, async () => {
-        await botManager.sendTyping(senderId)
+        // 打字指示器只是体验增强：没有 typing ticket 或上下文时不能拖垮整轮对话。
+        await botManager.sendTyping(senderId).catch((err) => {
+          log.warn({ err: (err as Error).message }, '打字指示器未送达')
+        })
 
         const session = await sessionManager.getOrCreate(userId, currentAgentId)
         const previousHistory = [...session.history]
@@ -196,7 +209,7 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
 
         const response = await agentRegistry.invoke(currentAgentId, agentPayload, async (intermediateText, intermediateMedia) => {
           if (intermediateMedia) {
-            await sendMediaReply(raw, intermediateMedia, intermediateText, botManager)
+            await deliverMedia(intermediateMedia, intermediateText)
           } else if (intermediateText.trim()) {
             await reply(intermediateText)
           }
@@ -214,18 +227,39 @@ export function createMessageHandler(ctx: MessageHandlerContext) {
         await sessionManager.append(userId, currentAgentId, assistantEntry)
 
         if (response.reply.media) {
-          await sendMediaReply(raw, response.reply.media, response.reply.text, botManager)
+          await deliverMedia(response.reply.media, response.reply.text)
         } else if (response.reply.text) {
           await reply(response.reply.text)
+        } else if (!delivered) {
+          // 既没有最终内容也没有中间结果 —— 用户会一直等。先记账，再给占位回复。
+          await outboundLog.record({
+            source: 'reply',
+            userId: senderId,
+            content: {},
+            status: 'failed',
+            error: `Agent ${currentAgentId} 本轮没有产出回复内容`,
+            ruleId: `agent:${currentAgentId}`,
+            trigger: text,
+          })
+          await reply(EMPTY_REPLY_HINT)
         }
       })
     } catch (err) {
       const error = err as Error
-      log.error({ err: error.message }, 'Message handler error')
+      log.error({ err: error.message, senderId }, 'Message handler error')
+      await outboundLog.record({
+        source: 'reply',
+        userId: senderId,
+        content: pendingContent ?? {},
+        status: 'failed',
+        error: error.message,
+        trigger: text,
+      })
       try {
-        await reply('服务繁忙，请稍后再试。')
-      } catch {
-        // sendReply already has context_token from incoming msg, should not fail
+        await botManager.sendReply(raw, { text: '服务繁忙，请稍后再试。' })
+      } catch (fallbackErr) {
+        // 连兜底提示都发不出去 = 这一整轮对用户彻底丢失，只剩记录和日志。
+        log.error({ err: (fallbackErr as Error).message, senderId }, '兜底提示同样未能送达微信')
       }
       throw error
     }

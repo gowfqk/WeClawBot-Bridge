@@ -74,9 +74,9 @@
         </n-card>
       </n-gi>
 
-      <!-- 通知日志 -->
+      <!-- 发送记录：通知 / 定时任务 / 对话回复的出站结果 -->
       <n-gi>
-        <n-card title="通知日志">
+        <n-card title="发送记录">
           <template #header-extra>
             <n-button size="small" @click="loadLogs">刷新</n-button>
           </template>
@@ -87,7 +87,7 @@
             :row-key="(row: NotifyLog) => row.id"
             :pagination="{ pageSize: 10 }"
           />
-          <n-empty v-if="logs.length === 0" description="暂无通知记录" style="padding: 40px 0" />
+          <n-empty v-if="logs.length === 0" description="暂无发送记录" style="padding: 40px 0" />
         </n-card>
       </n-gi>
     </n-grid>
@@ -134,8 +134,14 @@ interface NotifyRule {
 interface NotifyLog {
   id: string
   ruleId?: string
+  source?: 'notify' | 'task' | 'reply'
   userId: string
-  content: { text?: string }
+  content: {
+    text?: string
+    media?: { kind: 'image' | 'video' | 'file'; fileName?: string; bytes: number }
+  }
+  /** 对话回复失败时，触发这轮回复的用户消息 */
+  trigger?: string
   status: 'success' | 'failed'
   error?: string
   timestamp: number
@@ -188,9 +194,38 @@ const ruleColumns: DataTableColumns<NotifyRule> = [
   },
 ]
 
+const sourceLabels: Record<NonNullable<NotifyLog['source']>, { label: string; type: 'default' | 'info' | 'warning' }> = {
+  notify: { label: '通知', type: 'default' },
+  task: { label: '定时任务', type: 'info' },
+  reply: { label: '对话回复', type: 'warning' },
+}
+
+const mediaLabels: Record<NonNullable<NotifyLog['content']['media']>['kind'], string> = {
+  image: '图片',
+  video: '视频',
+  file: '文件',
+}
+
+function describeLogContent(row: NotifyLog): string {
+  const media = row.content?.media
+  if (media) {
+    const detail = `[${mediaLabels[media.kind]}${media.fileName ? ` ${media.fileName}` : ''} · ${formatFileSize(media.bytes)}]`
+    const text = row.content?.text
+    return text ? `${text} ${detail}` : detail
+  }
+  // 回复失败时常常根本没有内容可发，退回显示触发这轮回复的用户消息
+  return row.content?.text || row.trigger || '-'
+}
+
 const logColumns: DataTableColumns<NotifyLog> = [
-  { title: '接收对象', key: 'userId', width: 120, render: () => '默认用户' },
-  { title: '内容', key: 'content', ellipsis: { tooltip: true }, render: (row) => row.content?.text || '-' },
+  {
+    title: '来源', key: 'source', width: 90,
+    render: (row) => {
+      const source = sourceLabels[row.source || 'notify']
+      return h(NTag, { type: source.type, size: 'small', round: true }, () => source.label)
+    },
+  },
+  { title: '内容', key: 'content', ellipsis: { tooltip: true }, render: (row) => describeLogContent(row) },
   {
     title: '状态', key: 'status', width: 80,
     render: (row) => h(NTag, { type: row.status === 'success' ? 'success' : 'error', size: 'small', round: true }, () => row.status),
