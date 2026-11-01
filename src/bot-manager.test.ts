@@ -126,6 +126,28 @@ describe('BotManager SDK 事件', () => {
     listeners.get('error')!('字符串错误')
     expect(manager.getStatus().lastError?.message).toBe('字符串错误')
   })
+
+  it('凭证生命周期事件转发给订阅者，登录与恢复都算 restored', () => {
+    const manager = new BotManager(new MemoryStorage())
+    const seen: string[] = []
+    manager.onSessionEvent((kind) => seen.push(kind))
+
+    listeners.get('session:expired')!()
+    listeners.get('session:restored')!({ accountId: 'account', userId: 'user' })
+    listeners.get('login')!({ accountId: 'account', userId: 'user' })
+
+    expect(seen).toEqual(['expired', 'restored', 'restored'])
+  })
+
+  it('一个监听器抛错不影响其他监听器', () => {
+    const manager = new BotManager(new MemoryStorage())
+    const seen: string[] = []
+    manager.onSessionEvent(() => { throw new Error('订阅者炸了') })
+    manager.onSessionEvent((kind) => seen.push(kind))
+
+    listeners.get('session:expired')!()
+    expect(seen).toEqual(['expired'])
+  })
 })
 
 describe('BotManager 长文本分条', () => {

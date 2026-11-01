@@ -152,6 +152,35 @@
             </n-text>
           </n-card>
 
+          <!-- Session 过期提醒 -->
+          <n-card id="doc-session-alert" title="⚠️ Session 过期提醒">
+            <n-text>微信 token/session 过期后，SDK 会清空全部 context_token 并要求重新扫码 —— 掉线那一刻微信通道本身就是断的，微信侧的实时提醒在协议上做不到。</n-text>
+            <n-ul style="margin-top: 8px">
+              <n-li>过期/恢复事件先记进 Bot 页的「掉线记录」：失效时刻、恢复时刻、离线时长、期间漏推的主动推送条数（北京时间）。</n-li>
+              <n-li>重新扫码恢复后，等你发第一条微信消息，Bridge 借用这条消息的 context_token 补发一条提醒；补发失败会在下一条消息重试。</n-li>
+              <n-li>出站 webhook 是唯一能实时送达的路径：开启后过期立即推一次、恢复再推一次，不依赖微信通道。</n-li>
+              <n-li>Bot 页三个开关：「记录掉线事件」控制是否落库展示，「恢复后补发微信提醒」控制是否发微信，「Webhook 实时推送」控制是否推外部地址，互不影响。</n-li>
+            </n-ul>
+            <n-h4 style="margin: 12px 0 4px">接口</n-h4>
+            <n-text depth="3" style="font-size: 13px; display: block">
+              GET /api/session-alert — 开关、掉线记录、当前是否处于掉线窗口<br>
+              &nbsp;&nbsp;PUT /api/session-alert — 请求体 {"recordEnabled": true, "webhookEnabled": true, "webhookUrl": "https://…", "webhookFormat": "json"}，可只传一项
+            </n-text>
+            <n-h4 style="margin: 12px 0 4px">出站 webhook 的两种格式</n-h4>
+            <n-text depth="3" style="font-size: 13px; display: block">
+              json（自建接收端）{"source":"weclawbot-bridge", "event":"wechat_session_expired", "at":1735689600000, "text":"…", "clock":"01-01 08:00"}<br>
+              &nbsp;&nbsp;恢复事件额外带 "offlineMs" 与 "missedPushes"<br>
+              &nbsp;&nbsp;text（企业微信/钉钉群机器人）{"msgtype":"text", "text":{"content":"…"}}
+            </n-text>
+            <n-text depth="3" style="display: block; margin-top: 8px">
+              只支持 http/https，失败自动重试一次。群机器人业务失败也回 HTTP 200，所以响应体里 errcode 非 0 同样记为失败；
+              地址 query 里通常带机器人 token，日志与面板只显示去掉 query 的部分。每次推送的结果写进对应掉线记录的「Webhook」列。
+            </n-text>
+            <n-text depth="3" style="display: block; margin-top: 8px">
+              指标：<code>gateway_session_expired_total</code>、<code>gateway_session_webhook_total</code>（按 status 分标签）。启动时的首次登录不算掉线，不会打扰你。
+            </n-text>
+          </n-card>
+
           <!-- 定时任务 -->
           <n-card id="doc-scheduled" title="⏰ 定时任务">
             <n-text>侧边栏「定时任务」用于到点主动推送到微信，与「通知管理」的通知规则互相独立。</n-text>
@@ -249,6 +278,7 @@ const tocMenuOptions: MenuOption[] = [
   { label: '🔗 OpenAI 兼容 API', key: 'doc-openai' },
   { label: '📝 会话管理', key: 'doc-sessions' },
   { label: '📢 通知与 Webhook', key: 'doc-notify' },
+  { label: '⚠️ Session 过期提醒', key: 'doc-session-alert' },
   { label: '⏰ 定时任务', key: 'doc-scheduled' },
   { label: '🔌 WS Agent 状态', key: 'doc-ws-status' },
   { label: '💾 配置备份', key: 'doc-backup' },

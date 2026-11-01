@@ -9,6 +9,7 @@ import type { SessionManager } from './session-manager'
 import type { AppConfig } from './config'
 import type { WsAgentServer } from './ws-agent-server'
 import type { ScheduledTaskService, TaskMutationResult } from './scheduled-task-service'
+import type { SessionAlertService } from './session-alert-service'
 import { DEFAULT_TASK_TIMEZONE, nextCronRunAt, cronScheduleError, isValidTimezone } from './scheduled-task'
 import { saveAgents } from './config'
 import type { Storage } from './types'
@@ -24,7 +25,7 @@ import { generateWsToken, resolveWsToken, syncWsAgentToken } from './ws-token'
 import {
   LoginSchema, SetupSchema, ChangePasswordSchema,
   AgentConfigSchema, NotifySchema, NotifyRuleSchema,
-  SessionConfigSchema, ConfigImportSchema, validate,
+  SessionConfigSchema, ConfigImportSchema, SessionAlertSettingsSchema, validate,
 } from './schemas'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -42,6 +43,7 @@ export function createServer(
   logger: Logger,
   wsAgentServer?: WsAgentServer,
   scheduledTaskService?: ScheduledTaskService,
+  sessionAlertService?: SessionAlertService,
 ) {
   const app = express()
 
@@ -552,6 +554,25 @@ export function createServer(
 
   app.get('/api/bot/status', dynamicAuth, (_req, res) => {
     res.json(botManager.getStatus())
+  })
+
+  // ===== 微信 session 过期提醒 =====
+  app.get('/api/session-alert', dynamicAuth, (_req, res) => {
+    if (!sessionAlertService) { res.status(501).json({ error: 'session 提醒服务未启用' }); return }
+    res.json(sessionAlertService.getState())
+  })
+
+  app.put('/api/session-alert', dynamicAuth, async (req, res) => {
+    if (!sessionAlertService) { res.status(501).json({ error: 'session 提醒服务未启用' }); return }
+    const v = validate(SessionAlertSettingsSchema, req.body ?? {})
+    if (!v.ok) { res.status(400).json({ error: v.error }); return }
+    try {
+      const settings = await sessionAlertService.saveSettings(v.data)
+      res.json({ ok: true, settings })
+    } catch (err) {
+      const error = err as Error
+      res.status(500).json({ error: error.message })
+    }
   })
 
   app.get('/api/config', dynamicAuth, async (_req, res) => {

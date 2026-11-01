@@ -39,12 +39,16 @@ export type MessageHandler = (msg: {
   raw: unknown
 }) => Promise<void>
 
+/** 微信凭证的生命周期事件：过期后 SDK 会清空 context_token 并要求重新扫码。 */
+export type SessionEventKind = 'expired' | 'restored'
+
 export class BotManager {
   private bot: WeChatBot
   private status: BotStatus = { loggedIn: false, polling: false }
   private currentQrUrl: string | undefined
   private lastActiveUser: string | undefined  // 最近发消息的真实用户
   private lastSdkError: { at: number; message: string } | undefined
+  private sessionListeners: ((kind: SessionEventKind) => void)[] = []
   private loginPromise: Promise<unknown> | null = null
   private qrCallback: ((url: string) => void) | undefined
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null
@@ -65,6 +69,7 @@ export class BotManager {
     this.bot.on('session:expired', () => {
       log.warn('Session expired — SDK will auto-reconnect with QR if needed')
       this.status = { loggedIn: false, polling: false }
+      this.emitSessionEvent('expired')
     })
 
     this.bot.on('login', (creds) => {
@@ -76,6 +81,7 @@ export class BotManager {
         polling: true,  // SDK's poller auto-starts; don't call start() again
       }
       this.startKeepalive()
+      this.emitSessionEvent('restored')
     })
 
     this.bot.on('session:restored', (creds) => {
@@ -86,6 +92,7 @@ export class BotManager {
         polling: true,  // SDK resumes poller automatically after re-login
       }
       this.startKeepalive()
+      this.emitSessionEvent('restored')
     })
 
     // SDK 的 poller 内部会重试网络错误并向上抛；不订阅这些事件的话，
@@ -284,6 +291,21 @@ export class BotManager {
 
   get isRunning(): boolean {
     return this.bot.isRunning
+  }
+
+  /** 订阅微信凭证生命周期事件，供 session 过期提醒使用。 */
+  onSessionEvent(listener: (kind: SessionEventKind) => void): void {
+    this.sessionListeners.push(listener)
+  }
+
+  private emitSessionEvent(kind: SessionEventKind): void {
+    for (const listener of this.sessionListeners) {
+      try {
+        listener(kind)
+      } catch (err) {
+        log.error({ err: (err as Error).message, kind }, 'Session 事件监听器异常')
+      }
+    }
   }
 
   onMessage(handler: MessageHandler): void {

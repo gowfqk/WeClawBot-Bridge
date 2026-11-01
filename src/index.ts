@@ -14,6 +14,7 @@ import { botStatus } from './metrics'
 import { logger } from './logger'
 import { WsAgentServer } from './ws-agent-server'
 import { ScheduledTaskService } from './scheduled-task-service'
+import { SessionAlertService } from './session-alert-service'
 import { buildWsRemoteAgentConfig } from './ws-agent-registration'
 
 async function main(): Promise<void> {
@@ -134,6 +135,11 @@ async function main(): Promise<void> {
   const scheduledTaskService = new ScheduledTaskService(storage, notificationService, agentRegistry)
   await scheduledTaskService.load()
 
+  // ===== 微信 session 过期提醒：面板记录 + 恢复后借第一条来消息补发 =====
+  const sessionAlertService = new SessionAlertService(botManager, storage, outboundLog)
+  await sessionAlertService.load()
+  sessionAlertService.start()
+
   const app = createServer(
     config,
     botManager,
@@ -145,6 +151,7 @@ async function main(): Promise<void> {
     logger,
     wsAgentServer,
     scheduledTaskService,
+    sessionAlertService,
   )
 
   const server = http.createServer(app)

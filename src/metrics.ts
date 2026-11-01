@@ -44,6 +44,19 @@ export const sdkErrorCounter = new Counter({
   registers: [register],
 })
 
+export const sessionExpiredCounter = new Counter({
+  name: 'gateway_session_expired_total',
+  help: 'WeChat session/token expiries observed by the gateway',
+  registers: [register],
+})
+
+export const sessionWebhookCounter = new Counter({
+  name: 'gateway_session_webhook_total',
+  help: 'Out-of-band session expiry alerts posted to the configured webhook',
+  labelNames: ['status'],
+  registers: [register],
+})
+
 export function getMetrics(): Promise<string> {
   return register.metrics()
 }

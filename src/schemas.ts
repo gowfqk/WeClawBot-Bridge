@@ -77,6 +77,18 @@ export const SessionConfigSchema = z.object({
   expireMs: z.number().int().nonnegative().max(86400000 * 7).optional(),
 })
 
+/** 微信 session 过期提醒的开关与 webhook 配置，允许只改其中一部分 */
+export const SessionAlertSettingsSchema = z.object({
+  recordEnabled: z.boolean().optional(),
+  pushEnabled: z.boolean().optional(),
+  webhookEnabled: z.boolean().optional(),
+  webhookUrl: z.string().trim().max(500).optional(),
+  webhookFormat: z.enum(['json', 'text']).optional(),
+}).refine(
+  (value) => Object.values(value).some((entry) => entry !== undefined),
+  { message: '请至少提交一项设置' },
+)
+
 /**
  * 定时任务结构校验。kind/source 之间的组合约束（cron 表达式合法性、once 必须
  * 在未来、agent 来源必须有可用 Agent 等）在 scheduled-task.ts 的语义校验里完成。

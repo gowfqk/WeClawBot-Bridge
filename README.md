@@ -167,6 +167,8 @@ docker run -d \
 | POST | `/api/scheduled-tasks/:id/run` | 立即试跑一次（一次性任务会被置为已执行） |
 | GET | `/api/scheduled-tasks/preview-next` | 预览 cron+时区的下次触发时刻（`?schedule=0 9 * * *&timezone=Asia/Shanghai`） |
 | POST | `/api/webhook` | Webhook 推送（userId 可选） |
+| GET | `/api/session-alert` | session 过期提醒：开关、掉线记录、当前掉线/待发状态 |
+| PUT | `/api/session-alert` | 更新开关与 webhook（`{"recordEnabled":true,"pushEnabled":false,"webhookEnabled":true,"webhookUrl":"https://…","webhookFormat":"json"}`，可只传一项） |
 
 ### OpenAI 兼容调用
 
@@ -318,6 +320,8 @@ curl -s -G https://your-domain/api/scheduled-tasks/preview-next \
 - **对话回复失败**：`内容` 是没发出去的回复，没有内容时回退显示 `触发` 字段（用户原文），`错误` 是 SDK 原始报错。
 - **指标**：`gateway_send_failures_total{source}`、`gateway_sdk_errors_total{kind}`、`gateway_bot_online`，见 `/api/metrics`。
 - **`No context_token cached for user …`**：该用户还没给 bot 发过消息，或 session 过期重登后 SDK 清空了上下文。主动推送（通知/定时任务）在此之前一定失败，需要用户在微信里先发一条消息。
+- **Session 过期提醒（Bot 页）**：token/session 过期那一刻微信通道已经断了，微信侧的实时提醒在协议上做不到。Bridge 的做法是：过期/恢复事件先落到面板的掉线记录（含离线时长、期间漏推的主动推送条数），重新扫码恢复后再借用户第一条进来的消息的 context_token 补发一条微信提醒。Bot 页两个开关分别控制「记录事件」和「补发微信」，`GET /api/session-alert` 可查，指标 `gateway_session_expired_total`。
+- **掉线事件出站 webhook（第三个开关）**：唯一能实时送达的提醒路径。开启后过期那一刻立即 POST 到外部地址，恢复时再 POST 一次（带离线时长和漏推条数）。两种格式：`json` 给自建接收端（`{"source":"weclawbot-bridge","event":"wechat_session_expired","at":…,"text":"…","clock":"10-31 08:00"}`，恢复事件另有 `offlineMs`/`missedPushes`），`text` 直接是企业微信/钉钉群机器人的 `{"msgtype":"text","text":{"content":"…"}}`。只支持 http/https，失败重试一次；群机器人业务失败也回 HTTP 200，所以响应体里的 `errcode` 非 0 同样记为失败。日志与面板只显示脱敏后的地址（去掉 query，机器人 token 不落日志）。每次推送计入 `gateway_session_webhook_total{status}`，结果也并进掉线记录的 `webhook` 字段。
 - **Bot 页「最近 SDK 错误」**：轮询中断、微信侧限流等入站问题看这里；轮询停止期间消息不会送达，健康检查会自动重启。
 - **长回复分条**：微信单条文本上限 4000 字，超出后 SDK 会按段落/换行/空格切一刀 —— 这会把 ` ``` ` 代码围栏拦腰截断，后半段的 Markdown 不再渲染。Bridge 先用 `markdown-chunk.ts` 按围栏边界切好再逐条发，每条都是完整代码块（超长围栏会重开围栏并带上原语言标记）。分条中途失败时前面几条已投递、无法撤回，发送记录里留下的是整条原文的摘要。
 - **入站是 at-most-once**：SDK 先推进游标再交给处理器，进程在处理中途崩溃会丢掉那一条且不会记录。
@@ -333,6 +337,8 @@ WeClawBot-Bridge/
 │   ├── scheduled-task-service.ts   # 定时任务调度：tick 循环、推送、补跑宽限
 │   ├── outbound-log.ts             # 出站发送记录：通知/定时任务/对话回复的成功与失败
 │   ├── markdown-chunk.ts           # 长文本分条：按 ``` 代码块边界切，不切断围栏
+│   ├── session-alert.ts            # 掉线提醒纯逻辑：文案、时长、漏推计数、webhook 载荷与地址脱敏
+│   ├── session-alert-service.ts    # 掉线事件记录 + 恢复后借首条来消息补发提醒 + 实时 webhook
 │   └── ...
 ├── frontend/               # 前端源码 (Vue 3 + Vite)
 │   ├── src/
