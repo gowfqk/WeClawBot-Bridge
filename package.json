@@ -1,6 +1,6 @@
 {
   "name": "weclawbot-bridge",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "WeClawBot Bridge — 微信 ↔ OpenClaw AI Agent 桥接网关",
   "main": "dist/index.js",
   "scripts": {
